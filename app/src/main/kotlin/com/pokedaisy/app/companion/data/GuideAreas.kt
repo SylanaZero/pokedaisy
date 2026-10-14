@@ -46,6 +46,7 @@ private fun rawAreas(guide: GuideId): List<String> = when (guide) {
     GuideId.AMETHYST_V141 -> GUIDE_AREAS_AMETHYST_V141_RAW
     GuideId.CELIA -> GUIDE_AREAS_CELIA_RAW
     GuideId.ORANGE_ISLANDS -> GUIDE_AREAS_ORANGE_ISLANDS_RAW
+    GuideId.SOULGOLD -> GUIDE_AREAS_SOULGOLD_RAW
     GuideId.ULTRA_VIOLET -> GUIDE_AREAS_ULTRA_VIOLET_RAW
     GuideId.SWORD_SHIELD -> GUIDE_AREAS_SWORD_SHIELD_RAW
     // Each Recharged Yellow release moved items and gifts around: its own data.
@@ -54,7 +55,7 @@ private fun rawAreas(guide: GuideId): List<String> = when (guide) {
     GuideId.RECHARGED_YELLOW_V190 -> GUIDE_AREAS_RECHARGED_YELLOW_V190_RAW
     GuideId.RECHARGED_YELLOW_V194 -> GUIDE_AREAS_RECHARGED_YELLOW_V194_RAW
     // No area data yet: HERE lists the wild Pokémon alone.
-    GuideId.GLAZED, GuideId.IMPERIUM, GuideId.QUETZAL, GuideId.LAZARUS, GuideId.SEAGLASS, GuideId.TMT2, GuideId.SOULGOLD,
+    GuideId.GLAZED, GuideId.IMPERIUM, GuideId.QUETZAL, GuideId.LAZARUS, GuideId.SEAGLASS, GuideId.TMT2,
     GuideId.MARIOMON -> emptyList()
 }
 
