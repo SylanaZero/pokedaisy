@@ -60,7 +60,7 @@ This manual is built into PokeDaisy, so you can look something up without leavin
 
 - On the top screen, tap the `?` button in the library's header.
 - On the top screen, open Settings (the gear in the library's header) and pick `HELP`, in the `APP` group.
-- On the bottom screen, open the companion's `SETTINGS` and pick `HELP`, in the `COMPANION` group.
+- On the bottom screen, open the companion's `SETTINGS` and pick `HELP`, at the very end of the list, in the `APP` group.
 
 The top screen's copy has a search box: type what you're after ("fast-forward", "backup", "rebind") and the matching pages and sections show up. Each page links to the previous and next one at its end.
 
@@ -69,4 +69,4 @@ The app downloads the manual from the PokeDaisy website and keeps a copy, so aft
 ![The manual inside the app on the top screen: a search box and the list of sections and pages](shots/help-contents.png "The manual on the top screen")
 
 > [!TIP]
-> The same pages are on the website at [pokedaisy.web.app/docs](https://pokedaisy.web.app/docs/), handy for reading on a computer or sending a link to a friend.
+> The same pages are on the website at [pokedaisy.com/docs](https://pokedaisy.com/docs/), handy for reading on a computer or sending a link to a friend.

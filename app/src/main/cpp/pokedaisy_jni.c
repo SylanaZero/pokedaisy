@@ -57,6 +57,26 @@ static void pk_gb_config(struct mCore* core) {
 static int pk_is_gba(const struct mCore* core) {
     return core && core->platform(core) == mPLATFORM_GBA;
 }
+/** A clock the save file brought back broken: mGBA keeps the cart RTC's state in 16 bytes after the save data and
+ * restores it on reset (GBASavedataRTCRead), so a save dumped from a real cartridge whose battery had died - its
+ * power-fail flag set - or written by a tool that left the 24-hour bit off made Ruby / Sapphire / Emerald say "The
+ * internal battery has run dry" on every boot (sErrorStatus 0x20 / 0x10), where emulators that ignore those bytes
+ * didn't. The emulated battery never runs dry: such a clock goes back to mGBA's fresh one (24-hour, the device's
+ * time), and mGBA writes it into the save with the next save. 12-hour is only undone for the Pokémon games (they
+ * always set 24-hour); a state loaded from before this keeps the old byte too, hence the call after a load. */
+static void pkHealRtc(struct mCore* core) {
+    if (!pk_is_gba(core)) return;
+    struct GBA* gba = (struct GBA*) core->board;
+    struct GBARTC* rtc = &gba->memory.hw.rtc;
+    if (!(gba->memory.hw.devices & HW_RTC)) return;
+    const char* code = gba->memory.rom && gba->memory.romSize > 0xB0 ? (const char*) gba->memory.rom + 0xAC : "";
+    bool pokemon = !strncmp(code, "AXV", 3) || !strncmp(code, "AXP", 3) || !strncmp(code, "BPE", 3);
+    if (!RTCControlIsPoweroff(rtc->control) && (RTCControlIsHour24(rtc->control) || !pokemon)) return;
+    LOGI("RTC from the save: control 0x%02x (%s), reset to a running 24-hour clock", (unsigned) rtc->control,
+         RTCControlIsPoweroff(rtc->control) ? "battery dead" : "12-hour");
+    rtc->control = RTCControlFillHour24(0);
+    rtc->offset = 0;
+}
 #define PK_AUDIO_SCRATCH_SAMPLES 8192   // per-channel; * 2 shorts for interleave
 
 static struct {
@@ -259,6 +279,7 @@ Java_com_pokedaisy_app_MgbaCore_pkInit(JNIEnv* env, jobject thiz,
     }
 
     core->reset(core);
+    pkHealRtc(core);
 
     pthread_rwlock_wrlock(&pk_coreLock);
     g.core = core;
@@ -322,6 +343,33 @@ Java_com_pokedaisy_app_MgbaCore_pkSetKeys(JNIEnv* env, jobject thiz, jint mask) 
     }
 }
 
+/** The game wrote its save within the last ~15 frames: mGBA's dirty flag, cleared (and the file synced) once the
+ * writes have been quiet that long. A Gen 3 save spans several frames, sector after sector. */
+static bool pkSaveDirty(struct mCore* core) {
+    if (pk_is_gba(core)) return ((struct GBA*) core->board)->memory.savedata.dirty != 0;
+    if (core->platform(core) == mPLATFORM_GB) return ((struct GB*) core->board)->sramDirty != 0;
+    return false;
+}
+
+/** Lets a save the game is writing finish before the core stops (leaving the app, CLOSE GAME, a suspend state): the
+ * loop used to stop between any two frames, so leaving mid-"SAVING..." and then removing the app from recents (no
+ * resume to finish it) left the newer slot half written - the game said its save was corrupt and loaded the one
+ * before. Runs frames with no keys, unheard and undrawn, until mGBA has synced the save, at most [maxFrames].
+ * Emu thread, like pkRunFrame. Returns the frames run. */
+JNIEXPORT jint JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkFinishSave(JNIEnv* env, jobject thiz, jint maxFrames) {
+    if (!g.core) return 0;
+    int n = 0;
+    if (pkSaveDirty(g.core)) g.core->setKeys(g.core, 0);
+    while (n < maxFrames && pkSaveDirty(g.core)) {
+        g.core->runFrame(g.core);
+        pkDrainAudio();
+        g.audioAvail = 0;
+        n++;
+    }
+    return n;
+}
+
 JNIEXPORT void JNICALL
 Java_com_pokedaisy_app_MgbaCore_pkRunFrame(JNIEnv* env, jobject thiz) {
     if (!g.core) {
@@ -370,6 +418,29 @@ Java_com_pokedaisy_app_MgbaCore_pkWideConfigure(JNIEnv* env, jobject thiz, jint 
     uint32_t want = pk_is_gba(g.core) ? (uint32_t) crc : 0;
     if (want == g.wideCrc) return;
     g.wideCrc = pk_wide_configure(want) ? want : 0;
+}
+
+// SCENE SPEEDS / AUTO-RUN / RUN INDOORS / WILD ENCOUNTERS: read the field with the tables of the game whose ROM has
+// this CRC32 (0 = none), and its wild-encounter switch at wildFlag (0 = not found). Emu thread.
+JNIEXPORT void JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkFieldConfigure(JNIEnv* env, jobject thiz, jint crc, jint wildFlag) {
+    bool gba = g.core && pk_is_gba(g.core);
+    pk_field_configure(gba ? (uint32_t) crc : 0);
+    pk_field_wild(gba ? (uint32_t) wildFlag : 0);
+}
+
+// This frame's PK_FIELD_* bits (pk_field_state; 0 = not a game it knows); runIndoors lets the player run indoors,
+// wildKeep (percent) thins out wild encounters. Emu thread, between frames.
+JNIEXPORT jint JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkFieldState(JNIEnv* env, jobject thiz, jboolean runIndoors, jint wildKeep) {
+    return g.core && pk_is_gba(g.core) ? pk_field_state(g.core, runIndoors, wildKeep) : 0;
+}
+
+// SCENE SPEEDS' TEXT / AUTO-RUN / RUN INDOORS / WILD ENCOUNTERS: whether the field reads know the ROM with this CRC32.
+// Any thread, no core needed.
+JNIEXPORT jboolean JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkFieldKnows(JNIEnv* env, jobject thiz, jint crc) {
+    return pk_field_knows((uint32_t) crc) ? JNI_TRUE : JNI_FALSE;
 }
 
 // WIDE: whether it has tables for the ROM with this CRC32. Any thread, no core needed.
@@ -848,6 +919,7 @@ Java_com_pokedaisy_app_MgbaCore_pkLoadState(JNIEnv* env, jobject thiz, jstring j
     }
     bool ok = mCoreLoadStateNamed(g.core, vf, SAVESTATE_SAVEDATA | SAVESTATE_RTC);
     vf->close(vf);
+    if (ok) pkHealRtc(g.core);
     pk_wide_reset();   // the RAM it kept from the last frame is another moment's
     return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -878,6 +950,23 @@ static void pk_read_range(struct mCore* core, uint32_t addr, uint8_t* dst, int l
     }
 }
 
+// Game Boy Color: WRAM bank B's D000-DFFF read by its own address, (B << 16) | addr, whatever SVBK maps
+// at D000 right now - Crystal keeps its state in bank 1 but switches D000 to other banks mid-frame
+// (Gen2Reader's wramx). False for any other address, which reads over the bus as before.
+static bool pk_gb_read_banked(struct mCore* core, uint32_t addr, uint8_t* dst, int len) {
+    if (addr < 0x10000u || core->platform(core) != mPLATFORM_GB) {
+        return false;
+    }
+    struct GB* gb = core->board;
+    uint32_t bank = addr >> 16, off = addr & 0xFFFFu;
+    if (bank > 7 || off < 0xD000u || off + (uint32_t) len > 0xE000u || !gb->memory.wram) {
+        memset(dst, 0, (size_t) len);
+    } else {
+        memcpy(dst, gb->memory.wram + bank * GB_SIZE_WORKING_RAM_BANK0 + (off - 0xD000u), (size_t) len);
+    }
+    return true;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_pokedaisy_app_MgbaCore_pkReadBytes(JNIEnv* env, jobject thiz, jlong addr, jint len) {
     if (len <= 0 || len > (1 << 24)) {
@@ -889,7 +978,9 @@ Java_com_pokedaisy_app_MgbaCore_pkReadBytes(JNIEnv* env, jobject thiz, jlong add
     }
     pthread_rwlock_rdlock(&pk_coreLock);
     bool ok = g.core != NULL;
-    if (ok) {
+    if (ok && pk_gb_read_banked(g.core, (uint32_t) addr, tmp, len)) {
+        // a Color cart's WRAM bank, read by bank
+    } else if (ok) {
         pk_read_range(g.core, (uint32_t) addr, tmp, len);
         // The ROM as the file has it, under any cheat's hook or ROM patch: the
         // Poller identifies hacks by hashing it (see pk_cheats.c).

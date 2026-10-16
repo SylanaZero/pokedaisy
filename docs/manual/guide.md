@@ -74,9 +74,9 @@ The pages a game gets depend on how much of it has been mapped. The [supported g
 | Games | What the GUIDE has |
 | --- | --- |
 | FireRed, LeafGreen, Emerald, Ruby, Sapphire | Everything: HERE with all its sections, NEXT BOSS, EVOLUTIONS, TIPS, WHERE IS and STUCK? |
-| Unbound, Radical Red, Heart and Soul, Odyssey, Gaia, Amethyst, Celia's hack, Orange Islands, Ultra Violet, Sword and Shield Ultimate Plus, Recharged Yellow | NEXT BOSS, HERE with people and items, a WHERE IS built from the maps and, for most of them, a few TIPS |
-| Lazarus, Seaglass, Too Many Types 2, SoulGold, Glazed, Emerald Imperium, Quetzal, Super Mariomon | NEXT BOSS and the wild Pokémon in HERE |
-| Emerald Rogue, R.O.W.E., Yellow | No guide yet |
+| Unbound, Radical Red, Heart and Soul, Odyssey, Gaia, Amethyst, Celia's hack, Orange Islands, Ultra Violet, FireRed Rocket Edition, Ash Gray, Sword and Shield Ultimate Plus, GS Chronicles, Recharged Yellow, Emerald Legacy | NEXT BOSS, HERE with people and items, a WHERE IS built from the maps and, for most of them, a few TIPS |
+| Lazarus, Seaglass, Too Many Types 2, SoulGold, Glazed, Emerald Imperium, Quetzal (both releases, and Moemon Quetzal), Super Mariomon, Recharged Emerald | NEXT BOSS and the wild Pokémon in HERE |
+| Emerald Rogue, R.O.W.E., Yellow, Crystal, Crystal Clear, Prism | No guide yet |
 
 The original games' hand-written pages follow the app's language when you play a French, German, Italian, Spanish or Japanese copy. Most hacks' pages are in English.
 
@@ -87,4 +87,4 @@ The first time you open the GUIDE in a game, a `BEFORE YOU READ` window comes up
 HERE, NEXT BOSS and EVOLUTIONS are read straight from your game, so they match what's in your ROM. Tap `I UNDERSTAND` to carry on (it's only asked once per game) or `GO BACK` to return to the tab you came from.
 
 > [!NOTE]
-> Spotted a mistake in a guide? Report it on the [feedback page](https://pokedaisy.web.app/feedback/) (no GitHub account needed), and say which game and which entry.
+> Spotted a mistake in a guide? Report it on the [feedback page](https://pokedaisy.com/feedback/) (no GitHub account needed), and say which game and which entry.

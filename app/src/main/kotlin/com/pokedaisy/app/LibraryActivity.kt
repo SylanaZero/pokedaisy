@@ -24,7 +24,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -76,6 +78,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOff
@@ -111,6 +115,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.pokedaisy.app.companion.i18n.tk
+import com.pokedaisy.app.companion.KeyCapture
 import com.pokedaisy.app.companion.i18n.tr
 import com.pokedaisy.app.companion.ui.LOGO_PALETTE
 import com.pokedaisy.app.companion.ui.LOGO_ROWS
@@ -301,7 +306,7 @@ class LibraryActivity : ComponentActivity() {
         expandIntro = !prefs.expandIntroSeen && prefs.gameAspect != com.pokedaisy.app.companion.GameAspect.WIDE
 
         setContent {
-            AppTheme {
+            AppTheme { com.pokedaisy.app.companion.ui.CompactTextOnSmallWindows {
                 // The library's windows (INFO, RENAME, the pick-lists...) register their BACK here, as on the companion.
                 androidx.compose.runtime.CompositionLocalProvider(com.pokedaisy.app.companion.ui.LocalCompanionBack provides libraryBack) {
                     val s = setup
@@ -311,7 +316,7 @@ class LibraryActivity : ComponentActivity() {
                         else -> LibraryScreen()
                     }
                 }
-            }
+            } }
         }
 
         // Once ever, from the third open on and two days after the install: may we send crash reports?
@@ -335,6 +340,7 @@ class LibraryActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         isResumed = false
+        setup?.capture?.cancel()
     }
 
     override fun onResume() {
@@ -352,7 +358,7 @@ class LibraryActivity : ComponentActivity() {
             setup?.fromSettings = true
         }
         setup?.let { s ->
-            // Back from the rebind page: show what's bound now.
+            // Bindings changed elsewhere meanwhile (a game's companion): show what's bound now.
             if (s.step == SetupState.Step.BUTTONS) readButtons(s)
             // Back from Android's All files access page: carry on with the folder pick it was for.
             s.hasAccess = StorageAccess.hasAllFilesAccess(this)
@@ -406,7 +412,7 @@ class LibraryActivity : ComponentActivity() {
             // The lists scroll to the screen's edges (their margin is padding inside them), so a card
             // slides off the screen rather than being cut at an inner box's edge.
             Column(modifier = Modifier.fillMaxSize()) {
-                OptionTitleWindow("POKéDAISY", m, Modifier.padding(start = SCREEN_MARGIN, end = SCREEN_MARGIN, top = SCREEN_MARGIN), leading = {
+                OptionTitleWindow(if (narrowHeader) "" else "POKéDAISY", m, Modifier.padding(start = SCREEN_MARGIN, end = SCREEN_MARGIN, top = SCREEN_MARGIN), leading = {
                     PixelArt(LOGO_ROWS, LOGO_PALETTE, Modifier.size(m.lineHeight))
                 }) {
                     // The header's first button: where UP from the top of the games lands.
@@ -649,9 +655,17 @@ class LibraryActivity : ComponentActivity() {
         cursor: Boolean = false,
         onClick: () -> Unit,
     ) {
-        Spacer(Modifier.width(m.u * 4))
-        OptionButton(null, m, onClick = onClick, modifier = modifier.gbaFocusRing(cursor, PixelRoundedShape(m.u * 3)), icon = icon, contentDescription = label)
+        // A phone held upright: tighter buttons, so all six fit beside the logo (the gear was pushed off the end).
+        val narrow = narrowHeader
+        Spacer(Modifier.width(m.u * (if (narrow) 2 else 4)))
+        OptionButton(
+            null, m, onClick = onClick, modifier = modifier.gbaFocusRing(cursor, PixelRoundedShape(m.u * 3)), icon = icon,
+            contentDescription = label, sidePadding = if (narrow) 4 else 8,
+        )
     }
+
+    /** The library is narrower than [NARROW_HEADER] (a phone held upright): its header drops the name, keeps the logo. */
+    private val narrowHeader get() = screenSize.width > 0.dp && screenSize.width < NARROW_HEADER
 
     /** One of the launcher header's buttons: drawn in [LauncherList], pressed by A there ([launcherKey]). */
     private class HeaderButton(val icon: ImageVector, val label: String, val onClick: () -> Unit)
@@ -851,13 +865,18 @@ class LibraryActivity : ComponentActivity() {
     }
     /** About a menu column's width (Material's menus are 112-280 dp). */
     private val MENU_COLUMN_WIDTH = 280.dp
+    private val NARROW_HEADER = 600.dp
 
     /** The library screen's size, for a game's menu to pick one or two columns. */
     private var screenSize by mutableStateOf(DpSize.Zero)
 
     /** One entry of a game's menu: the classic view's dropdown and the launcher's B. */
     /** [opens]: it opens a window, a picker or another screen (the launcher's menu comes back when that closes). */
-    private class RomMenuItem(val label: String, val icon: ImageVector, val danger: Boolean = false, val opens: Boolean = false, val onClick: () -> Unit)
+    /** [pixel]: a [com.pokedaisy.app.companion.ui.PixelIcons] bitmap drawn instead of [icon] (the favorite stars). */
+    private class RomMenuItem(
+        val label: String, val icon: ImageVector, val danger: Boolean = false, val opens: Boolean = false,
+        val pixel: List<String>? = null, val onClick: () -> Unit,
+    )
 
     @Composable
     private fun RomOptionsMenu(
@@ -876,9 +895,9 @@ class LibraryActivity : ComponentActivity() {
     private fun romMenuItems(rom: File, onRename: () -> Unit, onDelete: () -> Unit): List<RomMenuItem> {
         return buildList {
             if (rom.absolutePath in prefs.favoriteRoms) {
-                add(RomMenuItem(tr("UNFAVORITE"), Icons.Filled.StarBorder) { setFavorite(rom, false) })
+                add(RomMenuItem(tr("UNFAVORITE"), Icons.Filled.StarBorder, pixel = com.pokedaisy.app.companion.ui.PixelIcons.starOutline) { setFavorite(rom, false) })
             } else {
-                add(RomMenuItem(tr("FAVORITE"), Icons.Filled.Star) { setFavorite(rom, true) })
+                add(RomMenuItem(tr("FAVORITE"), Icons.Filled.Star, pixel = com.pokedaisy.app.companion.ui.PixelIcons.star) { setFavorite(rom, true) })
             }
             add(RomMenuItem(tr("INFO"), Icons.Filled.Info, opens = true) { showInfo(rom) })
             add(RomMenuItem(tr("RENAME"), Icons.Filled.Edit, opens = true, onClick = onRename))
@@ -928,7 +947,10 @@ class LibraryActivity : ComponentActivity() {
             val fg = if (item.danger) OptionColors.value else OptionColors.label
             DropdownMenuItem(
                 text = { GbaText(item.label, fg, if (item.danger) OptionColors.valueShadow else OptionColors.labelShadow, m) },
-                leadingIcon = { Icon(item.icon, null, tint = fg) },
+                leadingIcon = {
+                    val px = item.pixel
+                    if (px != null) com.pokedaisy.app.companion.ui.PixelIcon(px, fg, Modifier.size(24.dp)) else Icon(item.icon, null, tint = fg)
+                },
                 onClick = { onDismiss(); item.onClick() },
             )
         }
@@ -994,7 +1016,11 @@ class LibraryActivity : ComponentActivity() {
     /** A favorite's star, beside its title. */
     @Composable
     private fun FavoriteStar(size: androidx.compose.ui.unit.Dp) {
-        Icon(Icons.Filled.Star, contentDescription = tr("Favorite"), tint = OptionColors.favorite, modifier = Modifier.size(size))
+        // The bag's pixel star (its starred items), in the favorites' gold.
+        com.pokedaisy.app.companion.ui.PixelIcon(
+            com.pokedaisy.app.companion.ui.PixelIcons.star, OptionColors.favorite,
+            Modifier.size(size).semantics { contentDescription = tr("Favorite") },
+        )
     }
 
     private fun setFavorite(rom: File, on: Boolean) {
@@ -1583,7 +1609,20 @@ class LibraryActivity : ComponentActivity() {
     /** B / BACK went to a window: its key up is that window's too (or Android's own BACK would follow). */
     private var backTaken = false
 
+    // Setup's GAME BUTTONS: analog L2 / R2 (Retroid's triggers send no keys) as BUTTON_L2 / R2, like the game takes them.
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        val capture = setup?.capture
+        if (capture != null && event.isFromSource(InputDevice.SOURCE_JOYSTICK) && capture.onTriggers(
+                maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE)),
+                maxOf(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS), event.getAxisValue(MotionEvent.AXIS_THROTTLE)),
+            )
+        ) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Setup's GAME BUTTONS row waiting for a button: every key is its, before the launcher, the windows or the focus.
+        if (setup?.capture?.onKey(event) == true) return true
         if (launcherOn && setup == null && !libraryDialogOpen && launcherKey(event)) return true
         // B (or BACK) with a window open closes that window, back to what opened it: the launcher's menu comes back
         // ([MenuReturnWatch]) - it used to drop to the games, or leave the library.
@@ -1657,7 +1696,7 @@ class LibraryActivity : ComponentActivity() {
         launcher.menu = LauncherMenu(
             romLabel(rom),
             romMenuItems(rom, onRename = { renaming = rom }, onDelete = { deleting = rom }).mapIndexed { i, item ->
-                LauncherMenu.Item(item.label, item.icon, item.danger, item.opens) {
+                LauncherMenu.Item(item.label, item.icon, item.danger, item.opens, item.pixel) {
                     // B / BACK out of what it opens lands back here, on this entry.
                     if (item.opens) {
                         menuReturn = MenuReturn(rom, i)
@@ -1983,8 +2022,13 @@ class LibraryActivity : ComponentActivity() {
             onBack = { setupBack(s) },
             onScreenScraperSignIn = { s.ssLogin.signIn(prefs, { r -> runOnUiThread { r() } }) { startMediaSync(s.covers) } },
             onScreenScraperSignOut = { s.ssLogin.signOut(prefs) },
-            onChangeButtons = {
-                startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SCREEN, SettingsActivity.SCREEN_CONTROLS))
+            buttonRequest = { btn ->
+                val dir = getExternalFilesDir(null) ?: filesDir
+                KeyCapture.Request(
+                    "GBA ${btn.label}", chord = false,
+                    onDone = { keys -> GbaControls.setBinding(dir, btn, keys.first()); readButtons(s) },
+                    onClear = if (btn.canClear) ({ GbaControls.clearBinding(dir, btn); readButtons(s) }) else null,
+                )
             },
             onNext = {
                 val steps = s.steps
@@ -2005,6 +2049,7 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun enterStep(s: SetupState, step: SetupState.Step) {
+        s.capture.cancel()
         s.step = step
         if (step == SetupState.Step.BUTTONS) readButtons(s)
         if (step == SetupState.Step.SAVES) {
@@ -2017,12 +2062,11 @@ class LibraryActivity : ComponentActivity() {
 
     /** The GAME BUTTONS step's list: A, B, L, R, START, SELECT (+ the second START / SELECT, turbo) as bound now. */
     private fun readButtons(s: SetupState) {
-        s.buttons = GbaControls.rawBindings(getExternalFilesDir(null) ?: filesDir).map { (btn, keys) ->
-            btn.label to keys.joinToString(" / ") { it.removePrefix("BUTTON_").replace('_', ' ') }
-        }
+        s.buttons = GbaControls.rawBindings(getExternalFilesDir(null) ?: filesDir)
     }
 
     private fun finishSetup() {
+        setup?.capture?.cancel()
         prefs.setupDone = true
         // Setup had its own GAME MEDIA step: no ScreenScraper popup after it (none while ScreenScraper is off).
         if (ScreenScraperClient.enabled) prefs.screenScraperAsked = true

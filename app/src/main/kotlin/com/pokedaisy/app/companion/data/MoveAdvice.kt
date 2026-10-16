@@ -8,11 +8,17 @@ package com.pokedaisy.app.companion.data
 data class MoveStats(val effect: String, val accuracy: Int, val pp: Int, val effectChance: Int, val priority: Int)
 
 /** Whether the running game's moves are the original games' (FireRed / LeafGreen / Ruby /
- * Sapphire / Emerald, any language): only those have [MoveStats] so far. */
-val movesAreVanilla: Boolean get() = activeGame == GameKind.FIRERED || activeGame == GameKind.EMERALD
+ * Sapphire / Emerald, any language): only those have [MoveStats] so far. A FireRed hack that
+ * changed moves (Rocket Edition, Ash Gray: [HackText.moves]) isn't, nor Recharged Emerald (its
+ * gBattleMoves changed accuracies and effects even where names, types and powers are retail's). */
+val movesAreVanilla: Boolean get() =
+    (activeGame == GameKind.FIRERED && runningFireRedHack?.moves.isNullOrEmpty()) ||
+        (activeGame == GameKind.EMERALD && runningEmeraldHack == null)
 
 /** [id]'s [MoveStats]; null where the running game's moves aren't the original games'. */
-fun moveStats(id: Int): MoveStats? = if (movesAreVanilla) vanillaMoveStats.getOrNull(id)?.takeIf { id > 0 } else null
+fun moveStats(id: Int): MoveStats? = if (!movesAreVanilla) null
+    // Emerald Legacy rebalanced ~130 moves (accuracy, PP, a few effects): its own table, read from its ROM.
+    else (if (emeraldLegacy) moveStatsEmeraldLegacy else vanillaMoveStats).getOrNull(id)?.takeIf { id > 0 }
 
 /** The original games' HMs (CUT, FLY, SURF, STRENGTH, FLASH, ROCK SMASH, WATERFALL, DIVE): the
  * game won't let a Pokémon forget one, so the advice never suggests it. */

@@ -3,7 +3,7 @@ title: Battles
 summary: The BATTLE tab's touch buttons, move verdicts, the INFO and SUGGESTIONS pages, the foe's team and switching Pokémon.
 section: companion
 order: 4
-keywords: [battle, fight, combat, trainer, wild, effectiveness, super effective, type chart, matchup, switch, swap, run, flee, foe, enemy, opponent, ability, held item, stat stages, boosts, ivs, recommendation, best move]
+keywords: [battle, fight, combat, trainer, wild, effectiveness, super effective, type chart, matchup, switch, swap, run, flee, foe, enemy, opponent, ability, held item, stat stages, boosts, ivs, recommendation, best move, battle buttons, single screen, one screen, widescreen, side buttons]
 ---
 
 In a battle the companion becomes your battle screen: big touch buttons for your turn, and the answers to the questions you'd otherwise look up mid-fight. Will this move hit hard? What is the foe weak to? Who should I send in?
@@ -108,7 +108,19 @@ Tap a Pokémon to send it in. PokeDaisy works the game's party menu for you, and
 
 The same pane appears when the game asks you to choose, for example after one of your Pokémon faints.
 
+This works in the Game Boy games too (Yellow, Crystal, Crystal Clear and Prism). There the game asks what to do with the Pokémon you picked, and PokeDaisy answers its switch option for you.
+
 ![The switch pane: the party in the game's slots, one Pokémon tagged BEST, EMBERPUP tagged OUT and GALEFINCH fainted, with Choose a POKéMON. and CANCEL below](shots/companion-battle-switch.png "Choosing who to send in")
+
+## On one screen: BATTLE BUTTONS
+
+On a device with one screen, held sideways, three buttons sit at the top right of the screen during a battle: `FIGHT`, `POKéMON` and `RUN`. They use the room beside the game (with `ASPECT` on `EXPAND`, the background past the battle's edges; on `ORIGINAL`, the black bar), and on a screen where that's narrow they reach a little into the battle's top-right corner, where there's only background.
+
+- `FIGHT` (with your Pokémon's icon on it) opens your moves as a list down the right side of the screen, one row each in the colours of the BATTLE tab's cards: the move's name and `PP` left, its type and power, and with `BATTLE HINTS` on its verdict against the foe (like `SUPER 2x`). Tap one to use it; a move out of PP can't be picked.
+- `POKéMON` opens your party as a list down the right side, drawn like the game's own party list: each Pokémon's icon over its ball (animated like the game's), name, level or status, and HP bar. `BEST` marks the one SUGGESTIONS would pick (it's highlighted, like the game's cursor) and `OUT` the one battling. Tap one to send it in.
+- `RUN` runs away. It's greyed out in a trainer battle, where you can't.
+
+To close a list without picking, tap outside it or `CANCEL` under it. The buttons look like the BATTLE tab's and dim while the battle plays out. They slide in from the right edge as a battle starts, and slide away while a list is open or the game's own party or bag screen is up. They show in single battles of the games with touch buttons, and only when there's room beside the game: not with `ASPECT` on `STRETCH`, nor while the companion is locked open beside the game. To hide them, turn off `BATTLE BUTTONS` in SETTINGS (SCREEN group, on either screen).
 
 ## Turning the hints off
 

@@ -1,6 +1,10 @@
 package com.pokedaisy.app.companion.ui
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +51,7 @@ import com.pokedaisy.app.companion.data.GuideContext
 import com.pokedaisy.app.companion.data.GuideEntry
 import com.pokedaisy.app.companion.data.GuidePage
 import com.pokedaisy.app.companion.data.GuideRomSource
+import com.pokedaisy.app.companion.data.wildSetOf
 import com.pokedaisy.app.companion.data.GuideSection
 import com.pokedaisy.app.companion.data.GuideTables
 import com.pokedaisy.app.companion.data.MapEncounters
@@ -76,6 +81,8 @@ import com.pokedaisy.app.companion.i18n.tr
 import com.pokedaisy.app.companion.i18n.trGuide
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 /** What the GUIDE tab has for a game: its hand-written [text], the ROM's
  * evolution table ([evolutions]) and the live pages' tables ([live]). */
@@ -156,13 +163,15 @@ fun GuideScreen(source: GuideSource, ui: GuideUiState, snapshot: SnapshotView, m
         if (value == null && t != null) value = withContext(Dispatchers.IO) { EvolutionSource.table(t) }
     }
     val live = source.live
+    // The map's wild set the save picks (Emerald Legacy's per-map vars); 0 everywhere else.
+    val wildSet = live?.wildSetOf(snapshot.mapGroup, snapshot.mapNum, snapshot.progress) ?: 0
     val here by produceState(
-        live?.let { GuideRomSource.cachedEncounters(it, snapshot.mapGroup, snapshot.mapNum) },
-        live, snapshot.mapGroup, snapshot.mapNum,
+        live?.let { GuideRomSource.cachedEncounters(it, snapshot.mapGroup, snapshot.mapNum, wildSet) },
+        live, snapshot.mapGroup, snapshot.mapNum, wildSet,
     ) {
         if (live != null) value = withContext(Dispatchers.IO) {
             dex?.let { PokedexSource.nationalOf(it.tables, 1) } // warm the species -> dex number map
-            GuideRomSource.encounters(live, snapshot.mapGroup, snapshot.mapNum)
+            GuideRomSource.encounters(live, snapshot.mapGroup, snapshot.mapNum, wildSet)
         }
     }
     val bosses = source.text?.let { it.bossesFor?.invoke(snapshot.mapGroup) ?: it.bosses }.orEmpty()
@@ -204,6 +213,8 @@ fun GuideScreen(source: GuideSource, ui: GuideUiState, snapshot: SnapshotView, m
                     selected = pages.indexOf(page),
                     minRow = m.rowHeight * 1.1f,
                     labelWeight = 1f,
+                    // The D-pad (the companion's window): the cursor shows the page it's on, as a tap does.
+                    onFocused = { i -> pages.getOrNull(i)?.let { ui.page = it.title } },
                 )
             }
         }
@@ -243,8 +254,14 @@ fun GuideNotice(verified: Boolean, onAccept: () -> Unit, onBack: () -> Unit, mod
         Column(Modifier.widthIn(max = 560.dp)) {
             OptionTitleWindow(tk("BEFORE YOU READ"), m)
             Spacer(Modifier.height(u * 4))
-            OptionListWindow(m, Modifier.fillMaxWidth()) {
+            // Shorter than the text (the one-screen window, an unchecked guide's extra line): the text scrolls, the
+            // buttons stay in view under it (they used to be pushed off the bottom).
+            OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 Column(Modifier.padding(horizontal = u * 8, vertical = u * 6), verticalArrangement = Arrangement.spacedBy(u * 6)) {
+                    Column(
+                        Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(u * 6),
+                    ) {
                     GbaText(
                         tr("This guide was written with the help of AI, from the game's own data. It can still get details wrong or leave things out - double-check anything that matters before relying on it.") +
                             if (verified) "" else " " + tr("This game's guide hasn't been checked in-game yet."),
@@ -254,9 +271,11 @@ fun GuideNotice(verified: Boolean, onAccept: () -> Unit, onBack: () -> Unit, mod
                         tr("HERE, NEXT BOSS and EVOLUTIONS come straight from the game's own data."),
                         OptionColors.muted, OptionColors.mutedShadow, rememberGbaTextMetrics(1f), maxLines = Int.MAX_VALUE,
                     )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(u * 4)) {
                         OptionButton(tk("GO BACK"), m, onClick = onBack, modifier = Modifier.weight(1f).height(m.rowHeight * 1.4f))
-                        OptionButton(tk("I UNDERSTAND"), m, onClick = onAccept, emphasis = true, modifier = Modifier.weight(1f).height(m.rowHeight * 1.4f))
+                        // Where the D-pad starts (the companion's window).
+                        OptionButton(tk("I UNDERSTAND"), m, onClick = onAccept, emphasis = true, modifier = Modifier.weight(1f).height(m.rowHeight * 1.4f).focusStart(true))
                     }
                 }
             }
@@ -279,13 +298,20 @@ private fun SectionHeading(section: GuideSection, small: GbaTextMetrics) {
 private fun EntryRow(e: GuideEntry, level: Int, owned: Boolean, m: GbaTextMetrics, small: GbaTextMetrics, onClick: () -> Unit) {
     val u = m.u
     val noRipple = remember { MutableInteractionSource() }
+    val focused by noRipple.collectIsFocusedAsState()
     val showHint = e.hint != null && level >= 1
     val showAnswer = e.steps > 0 && level >= e.steps
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // The D-pad's cursor (the companion's window): the white row. A fact with nothing to reveal is a stop too, so
+            // the D-pad walks - and scrolls - the whole page.
+            .background(if (focused) OptionColors.rowSelected else Color.Transparent)
             .drawBehind { drawRowDivider(OptionColors.divider, u.toPx(), 4 * u.toPx()) }
-            .soundClickable(interactionSource = noRipple, indication = null, enabled = e.steps > 0, onClick = onClick)
+            .then(
+                if (e.steps > 0) Modifier.soundClickable(interactionSource = noRipple, indication = null, onClick = onClick)
+                else Modifier.focusable(interactionSource = noRipple),
+            )
             .padding(horizontal = u * 6, vertical = u * 4),
         verticalArrangement = Arrangement.spacedBy(u * 2),
     ) {
@@ -395,6 +421,11 @@ private fun herePage(
             hasWild && enc == null -> tr("Reading the map...")
             else -> buildList {
                 if (hasWild && methods.isEmpty()) add(tr("No wild POKéMON on this map."))
+                // The area's DexNav (GitHub #85): how many of its wild POKéMON are caught, every method counted once.
+                if (dex != null && methods.isNotEmpty()) {
+                    val here = methods.flatMap { (_, l) -> l.map { national(it.species) } }.filter { it > 0 }.toSet()
+                    if (here.isNotEmpty()) add(tr("{0} of {1} caught here.", here.count { it in dex.caught }, here.size))
+                }
                 if (items.isNotEmpty() || people.isNotEmpty()) add(tr("Its buildings included."))
                 if (snapshot.progress != null) add(tr("A ball = done."))
             }.joinToString(" ").ifEmpty { tr("Nothing listed for this area.") }

@@ -1,5 +1,8 @@
 package com.pokedaisy.app.companion.ui
 
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import com.pokedaisy.app.companion.i18n.tk
 import com.pokedaisy.app.companion.i18n.tr
 import android.graphics.Bitmap
@@ -7,6 +10,15 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import com.pokedaisy.app.companion.ui.theme.gbaFocusRing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -89,6 +101,9 @@ fun MapScreen(
     Box(modifier = modifier.fillMaxSize()) {
         val playerRegion = model?.sections?.get(snapshot.regionMapSectionId)?.region?.takeIf { it in model.images.indices }
         var selection by remember(model) { mutableStateOf<MapSelection?>(null) }
+        // The tile the D-pad moves the cursor from (the companion's window): the last one tapped or moved to; null = the
+        // player's (or the picked place's first).
+        var cursorTile by remember(model) { mutableStateOf<Pair<Int, Int>?>(null) }
         var shownOverride by remember(model) { mutableStateOf<Int?>(null) }
         var placesOpen by remember { mutableStateOf(false) }
         // FLY: its destinations once asked for, or what kept it from starting.
@@ -106,9 +121,9 @@ fun MapScreen(
         // Back to the player when they land somewhere else after FLY, or cross to another of the map's regions (the
         // Sevii ferry): a tile picked or a region flipped to before would keep the map away from where they are now.
         var flewFrom by remember { mutableStateOf<Int?>(null) }
-        LaunchedEffect(playerRegion) { selection = null; shownOverride = null }
+        LaunchedEffect(playerRegion) { selection = null; cursorTile = null; shownOverride = null }
         LaunchedEffect(snapshot.regionMapSectionId) {
-            if (flewFrom != null && snapshot.regionMapSectionId != flewFrom) { selection = null; shownOverride = null; flewFrom = null }
+            if (flewFrom != null && snapshot.regionMapSectionId != flewFrom) { selection = null; cursorTile = null; shownOverride = null; flewFrom = null }
         }
         val shown = selection?.region ?: shownOverride ?: playerRegion ?: 0
         val bitmap = regionMapBitmap(model?.images?.getOrNull(shown))
@@ -129,6 +144,11 @@ fun MapScreen(
             // The map fills the tab while that stretches it only a little (the Thor's
             // bottom screen: ~16% taller), else keeps its own shape, centred (a wide screen).
             val crop = remember(bitmap) { regionMapContentBounds(bitmap) }
+            // The D-pad between the map and its buttons (the companion's window): they sit inside the map's own box,
+            // so neither finds the other by itself.
+            val mapFocus = remember { FocusRequester() }
+            val buttonsFocus = remember { FocusRequester() }
+            val bottomRow = snapshot.game in BOTTOM_ROW_MAPS
             BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 val mapAspect = crop.width.toFloat() / crop.height
                 val boxAspect = maxWidth / maxHeight
@@ -147,17 +167,21 @@ fun MapScreen(
                         label = gameCase(name),
                         dungeon = dungeon?.let(::gameCase),
                         onTap = { tx, ty ->
+                            cursorTile = tx to ty
                             selection = if (playerTile != null && tx to ty == playerTile) null else model.select(shown, tx, ty)
                         },
+                        cursorFrom = cursorTile ?: sel?.tiles?.firstOrNull()?.let { it.x to it.y } ?: playerTile,
+                        self = mapFocus, buttons = buttonsFocus, buttonsBottom = bottomRow,
                     )
                     MapButtons(
-                        style = style,
+                        bottomRow = bottomRow,
+                        map = mapFocus, group = buttonsFocus,
                         regionLabel = if (model.images.size > 1) regionName(model.images, (shown + 1) % model.images.size) else null,
                         awayFromPlayer = selection != null || (playerRegion != null && shown != playerRegion),
                         onPlaces = { placesOpen = true },
                         onFly = openFly,
-                        onRegion = { selection = null; shownOverride = (shown + 1) % model.images.size },
-                        onMe = { selection = null; shownOverride = null },
+                        onRegion = { selection = null; cursorTile = null; shownOverride = (shown + 1) % model.images.size },
+                        onMe = { selection = null; cursorTile = null; shownOverride = null },
                     )
                 }
             }
@@ -182,9 +206,10 @@ fun MapScreen(
                     model,
                     onPick = { id ->
                         placesOpen = false
+                        cursorTile = null
                         selection = model.sections[id]?.let { MapSelection(it.region, model.tilesOf(id), it.name, null) }
                     },
-                    onMe = { placesOpen = false; selection = null; shownOverride = null },
+                    onMe = { placesOpen = false; selection = null; cursorTile = null; shownOverride = null },
                     onDismiss = { placesOpen = false },
                 )
             }
@@ -208,7 +233,7 @@ private fun RegionMapModel.select(region: Int, tx: Int, ty: Int): MapSelection {
  * Each game family's own region-map label, sampled from the game (headless
  * mGBA, the Town Map / wall map); sizes in map pixels.
  */
-private enum class MapLabelStyle(val width: Int, val height: Int) {
+internal enum class MapLabelStyle(val width: Int, val height: Int) {
     /** FireRed: a strip that darkens the map (GBA blend, ~10/16) from the map's top-left corner, white text, grey shadow. */
     FIRERED(120, 16),
 
@@ -222,11 +247,18 @@ private enum class MapLabelStyle(val width: Int, val height: Int) {
     val cursorColor: Color get() = if (this == GEN1) Color(0xFF181818) else Color.White
 
     /** The player's 16x16 head on the map (regionmap/player_*.png, from the ROM by RomArt). */
-    fun headAsset(gender: Int, game: GameKind? = null): String = when (this) {
+    fun headAsset(gender: Int, game: GameKind? = null): String? = when (this) {
         FIRERED -> if (gender == 1) "player_leaf" else "player_red"
         // Super Mariomon drew MARIO in Brendan's slot.
-        EMERALD -> if (gender == 1) "player_may" else if (game == GameKind.MARIOMON) "player_mario" else "player_brendan"
-        GEN1 -> "player_yellow"   // Red's standing sprite, from the ROM (Gen1Art)
+        // Recharged Emerald redrew both heads for its map.
+        EMERALD -> if (com.pokedaisy.app.companion.data.runningEmeraldHack != null) { if (gender == 1) "player_may_re" else "player_brendan_re" }
+            else if (gender == 1) "player_may" else if (game == GameKind.MARIOMON) "player_mario" else "player_brendan"
+        // Red's standing sprite (Gen1Art), or Crystal's CHRIS / KRIS (Gen2Art), from the ROM.
+        // Crystal Clear's player is the player's own (model, skin, colours): none drawn.
+        GEN1 -> if (game == GameKind.CRYSTAL_CLEAR || game == GameKind.PRISM) null   // Prism's too (six models)
+            else if (game != GameKind.CRYSTAL) "player_yellow"
+            else if (gender == 1) com.pokedaisy.app.companion.data.Gen2Art.CRYSTAL_PLAYER_F
+            else com.pokedaisy.app.companion.data.Gen2Art.CRYSTAL_PLAYER
     }
 
     companion object {
@@ -238,7 +270,7 @@ private enum class MapLabelStyle(val width: Int, val height: Int) {
 
         fun of(game: GameKind?) = when (game) {
             in EMERALD_FAMILY -> EMERALD
-            GameKind.YELLOW -> GEN1
+            GameKind.YELLOW, GameKind.CRYSTAL, GameKind.CRYSTAL_CLEAR, GameKind.PRISM -> GEN1   // Crystal's POKéGEAR map: the same black name on light
             else -> FIRERED
         }
     }
@@ -250,10 +282,23 @@ private fun regionName(images: Array<String>, i: Int): String = when (images[i])
     "sevii123" -> "SEVII 1-3"
     "sevii45" -> "SEVII 4-5"
     "sevii67" -> "SEVII 6-7"
+    "crystal_johto" -> "JOHTO"
+    "crystal_kanto" -> "KANTO"
+    "crystal_clear_johto" -> "JOHTO"
+    "crystal_clear_kanto" -> "KANTO"
+    "prism_naljo" -> "NALJO"
+    "prism_rijon" -> "RIJON"
+    "prism_johto" -> "JOHTO"
+    "prism_kanto" -> "KANTO"
+    "prism_sevii" -> "SEVII"
+    "prism_tunod" -> "TUNOD"
     else -> tr("MAP {0}", i + 1)
 }
 
-/** The map image in its rounded frame with the head, the cursor and the label over it; [onTap] gets the tapped tile. */
+/** The map image in its rounded frame with the head, the cursor and the label over it; [onTap] gets the tapped tile.
+ * In the companion's window it's a D-pad stop (where the tab starts, ringed while focused): the D-pad moves the cursor a
+ * tile from [cursorFrom] (through [onTap], naming each place like the game's Town Map), and off the map's edge the
+ * focus goes on to the buttons. */
 @Composable
 private fun RegionMap(
     bitmap: Bitmap,
@@ -264,6 +309,13 @@ private fun RegionMap(
     label: String,
     dungeon: String?,
     onTap: (Int, Int) -> Unit,
+    /** The tile a D-pad move starts from; null = the map's middle. */
+    cursorFrom: Pair<Int, Int>? = null,
+    /** The map's own focus, and its buttons' ([buttonsBottom]: along the bottom, else top right): off the map's edge on
+     * their side, the D-pad goes to them. */
+    self: FocusRequester = remember { FocusRequester() },
+    buttons: FocusRequester? = null,
+    buttonsBottom: Boolean = false,
 ) {
     // FireRed's region-map cursor (graphics/region_map/cursor.png) swaps
     // between its two frames every 20 game frames. Read only while drawing,
@@ -278,9 +330,39 @@ private fun RegionMap(
     val shape = PixelRoundedShape(12.dp)
     val sound = LocalClickSound.current
     val tap by rememberUpdatedState(onTap)
+    val from by rememberUpdatedState(cursorFrom)
+    val keys = remember { MutableInteractionSource() }
+    val focused by keys.collectIsFocusedAsState()
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .focusStart(true)
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val (dx, dy) = when (e.key) {
+                    Key.DirectionLeft -> -1 to 0
+                    Key.DirectionRight -> 1 to 0
+                    Key.DirectionUp -> 0 to -1
+                    Key.DirectionDown -> 0 to 1
+                    else -> return@onPreviewKeyEvent false
+                }
+                // The map's tiles (its border cropped off); off them, the key moves the focus out instead.
+                val (cols, rows) = crop.left / TILE..(crop.right - 1) / TILE to crop.top / TILE..(crop.bottom - 1) / TILE
+                val (x, y) = from ?: ((cols.first + cols.last) / 2 to (rows.first + rows.last) / 2)
+                val tx = x + dx
+                val ty = y + dy
+                if (tx !in cols || ty !in rows) return@onPreviewKeyEvent false
+                tap(tx, ty)
+                true
+            }
+            .gbaFocusRing(focused, shape)
+            .focusRequester(self)
+            .focusProperties {
+                if (buttons != null) {
+                    if (buttonsBottom) { down = buttons; left = buttons } else { up = buttons; right = buttons }
+                }
+            }
+            .focusable(interactionSource = keys)
             .clip(shape)
             .drawWithContent {
                 drawContent()
@@ -403,10 +485,19 @@ private fun MapLabel(style: MapLabelStyle, label: String, dungeon: String?, crop
     if (dungeon != null && style == MapLabelStyle.FIRERED) box(1, dungeon)
 }
 
-/** PLACES / region / ME, in the corner across from the label (sea on both games' maps). */
+/** Maps whose top right is land and routes, with open sea along the bottom left instead (left of their label window):
+ * Heart and Soul's Johto (its north-east routes run into the corner) and R.O.W.E.'s (its Sevii title strip and islands). */
+private val BOTTOM_ROW_MAPS = setOf(GameKind.HEART_AND_SOUL, GameKind.ROWE)
+
+/** PLACES / region, FLY under them and ME, top right on every map. Emerald-style maps had them bottom left, across from
+ * their bottom-right label - over the west of Hoenn's land, where the player looks; the top right is open sea there too.
+ * [bottomRow] ([BOTTOM_ROW_MAPS]): one row along the bottom left instead, low enough to stay on the sea. */
 @Composable
 private fun BoxScope.MapButtons(
-    style: MapLabelStyle,
+    bottomRow: Boolean,
+    /** The map's focus and this group's (the D-pad, the companion's window): back to the map from the buttons. */
+    map: FocusRequester,
+    group: FocusRequester,
     regionLabel: String?,
     awayFromPlayer: Boolean,
     onPlaces: () -> Unit,
@@ -416,34 +507,55 @@ private fun BoxScope.MapButtons(
     onFly: (() -> Unit)? = null,
 ) {
     val m = rememberGbaTextMetrics(1f)
-    val bottom = style == MapLabelStyle.EMERALD
+    // Toward the map from a button: UP from the bottom row; LEFT from the top right (but between a row's own buttons),
+    // DOWN from its lowest.
+    fun toMap(up: Boolean = false, left: Boolean = false, down: Boolean = false) = Modifier.focusProperties {
+        if (up) this.up = map
+        if (left) this.left = map
+        if (down) this.down = map
+    }
+    if (bottomRow) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(m.u * 4),
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier.align(Alignment.BottomStart).padding(m.u * 8).focusRequester(group),
+        ) {
+            if (regionLabel != null) OptionButton(regionLabel, m, onClick = onRegion, modifier = toMap(up = true))
+            OptionButton(tr("PLACES"), m, onClick = onPlaces, modifier = toMap(up = true))
+            if (onFly != null) FlyButton(onFly, toMap(up = true))
+            if (awayFromPlayer) OptionButton(tr("ME"), m, onClick = onMe, emphasis = true, modifier = toMap(up = true))
+        }
+        return
+    }
     // ME on its own row (nearer the edge), so the row beside the label stays short.
     Column(
-        horizontalAlignment = if (bottom) Alignment.Start else Alignment.End,
+        horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(m.u * 4),
-        modifier = Modifier
-            .align(if (bottom) Alignment.BottomStart else Alignment.TopEnd)
-            .padding(m.u * 8),
+        modifier = Modifier.align(Alignment.TopEnd).padding(m.u * 8).focusRequester(group),
     ) {
-        // FLY next to PLACES on the side away from the label: under it up top, over it at the bottom - in the
-        // party menu's field-move blue.
-        // At the companion's full text size (the others are the denser 1x): the button that does something in the game.
-        val big = rememberGbaTextMetrics()
-        val flyButton = @Composable {
-            if (onFly != null) OptionButton(
-                tr("FLY"), big, onClick = onFly, modifier = Modifier.widthIn(min = big.u * 56),
-                labelColors = OptionColors.fieldMove to OptionColors.fieldMoveShadow, frameLayers = OptionColors.fieldMoveLayers,
-            )
+        val lowest = when {
+            awayFromPlayer -> "ME"
+            onFly != null -> "FLY"
+            else -> "TOP"
         }
-        if (awayFromPlayer && bottom) OptionButton(tr("ME"), m, onClick = onMe, emphasis = true)
-        if (bottom) flyButton()
         Row(horizontalArrangement = Arrangement.spacedBy(m.u * 4)) {
-            if (regionLabel != null) OptionButton(regionLabel, m, onClick = onRegion)
-            OptionButton(tr("PLACES"), m, onClick = onPlaces)
+            if (regionLabel != null) OptionButton(regionLabel, m, onClick = onRegion, modifier = toMap(left = true, down = lowest == "TOP"))
+            OptionButton(tr("PLACES"), m, onClick = onPlaces, modifier = toMap(left = regionLabel == null, down = lowest == "TOP"))
         }
-        if (!bottom) flyButton()
-        if (awayFromPlayer && !bottom) OptionButton(tr("ME"), m, onClick = onMe, emphasis = true)
+        if (onFly != null) FlyButton(onFly, toMap(left = true, down = lowest == "FLY"))
+        if (awayFromPlayer) OptionButton(tr("ME"), m, onClick = onMe, emphasis = true, modifier = toMap(left = true, down = true))
     }
+}
+
+/** FLY in the party menu's field-move blue, at the companion's full text size (the other map buttons are the denser
+ * 1x): the button that does something in the game. */
+@Composable
+private fun FlyButton(onFly: () -> Unit, modifier: Modifier = Modifier) {
+    val big = rememberGbaTextMetrics()
+    OptionButton(
+        tr("FLY"), big, onClick = onFly, modifier = modifier.widthIn(min = big.u * 56),
+        labelColors = OptionColors.fieldMove to OptionColors.fieldMoveShadow, frameLayers = OptionColors.fieldMoveLayers,
+    )
 }
 
 /**
@@ -485,7 +597,7 @@ private fun PlacesList(model: RegionMapModel, onPick: (Int) -> Unit, onMe: () ->
 }
 
 /** MOVE_FLY: the same id in every game the companion flies in. */
-private const val FLY_MOVE = 19
+internal const val FLY_MOVE = 19
 
 /**
  * FLY's destinations: the towns the game's Fly map would take - visited ones, in the map's own order - each a row
@@ -516,7 +628,7 @@ private fun FlyList(model: RegionMapModel?, targets: com.pokedaisy.app.companion
 }
 
 /** Why FLY didn't start, in the companion's words. */
-private fun flyMessage(r: com.pokedaisy.app.companion.data.FlyResult): String = when (r) {
+internal fun flyMessage(r: com.pokedaisy.app.companion.data.FlyResult): String = when (r) {
     com.pokedaisy.app.companion.data.FlyResult.NOT_NOW -> tr("Not now: close the game's menus and battles first.")
     com.pokedaisy.app.companion.data.FlyResult.IN_BATTLE -> tr("You can't do that during a battle.")
     com.pokedaisy.app.companion.data.FlyResult.NO_BADGE -> tr("FLY needs a new BADGE first.")
@@ -594,7 +706,7 @@ private val FR_SHADOW = Color(0xFF636363)
  * long, 2 pixels out from it, or 3 on the [big] frame - as the cursor sprite
  * draws them around its tile. [sx]/[sy] are screen pixels per map pixel.
  */
-private fun DrawScope.drawMapCursor(left: Int, top: Int, right: Int, bottom: Int, sx: Float, sy: Float, big: Boolean, color: Color = Color.White) {
+internal fun DrawScope.drawMapCursor(left: Int, top: Int, right: Int, bottom: Int, sx: Float, sy: Float, big: Boolean, color: Color = Color.White) {
     val out = if (big) 3 else 2
     val x0 = left - out
     val y0 = top - out

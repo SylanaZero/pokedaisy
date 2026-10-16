@@ -8,9 +8,9 @@ keywords: [ff, turbo, speed up, skip, grind, grinding, slowmo, slow motion, musi
 
 Pokémon games have a lot of walking, text and grinding. Fast-forward runs the game several times faster so you get through it quicker, and PokeDaisy tries to get out of your way when speed would be a problem: in menus, on the map, and with the music.
 
-You'll find all the speed settings under `FAST-FORWARD` at the top of the companion's `SETTINGS`. Most of them are on the top screen's Settings too.
+You'll find all the speed settings under `FF / SPEED` at the top of the companion's `SETTINGS`. The ones you set once and leave, `SCENE SPEEDS`, `FF MODE` and `FF MUSIC`, are a tap further in, on its `SPEED OPTIONS` page. Most of them are on the top screen's Settings too.
 
-![The companion's SETTINGS tab, with the FAST-FORWARD group at the top: FF, FF SPEED, GAME SPEED, FF MODE, FF MUSIC and REWIND](shots/companion-settings.png "The FAST-FORWARD group in the companion's SETTINGS")
+![The companion's SETTINGS tab, with the FF / SPEED group at the top: FF, FF SPEED, GAME SPEED, REWIND and SPEED OPTIONS](shots/companion-settings.png "The FF / SPEED group in the companion's SETTINGS")
 
 ## Turning fast-forward on
 
@@ -51,6 +51,19 @@ It's saved for each game separately. Set a hack you're replaying to `1.5×` and 
 
 The `SPEED CYCLE` hotkey (L2 on a controller, or the = key) steps through `1×`, `1.5×`, `2×`, `3×` and `4×` and round again, without opening `SETTINGS`. If you're on one of the slow speeds, it goes back to `1×`. Where it stops is saved for that game too.
 
+## Battles, text and menus at their own speed: SCENE SPEEDS
+
+`SCENE SPEEDS` (companion `SETTINGS` only, on the `SPEED OPTIONS` page) gives parts of the game a speed of their own. You can keep walking around at normal speed and still have battles go by at 2x, for example:
+
+- **`BATTLE SPEED`** covers the whole battle, from the first message to the last. Its bag and party screens follow `MENU SPEED` instead.
+- **`TEXT SPEED`** applies whenever a text box is open on the field: someone talking, a sign, a message after you pick something up. The words come out that much faster, close to instant text. The START menu counts too.
+- **`MENU SPEED`** covers menu screens: your party, the bag, the summary, the PC, the map and so on.
+- **`BIKE SPEED`** applies while you ride a bike on the field, and **`SURF SPEED`** while you surf (or dive). The whole game runs at that speed meanwhile, so the people and creatures around you speed up too.
+
+Each one is `SAME` (the default: it follows `GAME SPEED`, like walking around does) or `1×` up to `4×`. These apply while fast-forward is off; turn fast-forward on and it wins everywhere. A sped-up scene's music follows `FF MUSIC`, the same as fast-forward's.
+
+`TEXT SPEED` shows `N/A` on a game PokeDaisy can't read text boxes in yet. `BIKE SPEED` and `SURF SPEED` show `N/A` until you've walked around for a moment in a game, and stay that way on hacks where PokeDaisy can't tell yet whether you're riding or surfing: Heart and Soul, SoulGold, Too Many Types 2, Emerald Rogue and Quetzal.
+
 ## Slow motion
 
 Hold the `SLOWMO HOLD` hotkey and the game runs at half speed until you let go, with the sound muted. It's handy for a tricky moment, like timing a button press or watching an animation you'd otherwise miss. On a keyboard it's the minus key; it has no controller button by default, so give it one under `HOTKEYS` if you want it.
@@ -75,6 +88,8 @@ Sped-up game music turns into chipmunk noise. `FF MUSIC` picks what you hear whi
 Ruby, Sapphire, Emerald and the Pokémon hacks that use a clock get it from your device. Day and night, berries growing, tides and daily events follow the device's date and time, with nothing to set up. Save files and save states keep the clock, so it carries on correctly.
 
 The clock follows real time, not game speed: fast-forward doesn't make berries grow faster.
+
+A save copied off a real cartridge can carry that cartridge's clock with it, and an old cartridge's clock battery is often dead. PokeDaisy starts such a clock fresh from your device, so the game doesn't greet you with "The internal battery has run dry" and its clock events keep working.
 
 ## Rewind
 

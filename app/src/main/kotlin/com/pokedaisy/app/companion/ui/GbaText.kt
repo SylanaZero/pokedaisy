@@ -1,6 +1,7 @@
 package com.pokedaisy.app.companion.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +45,30 @@ class GbaTextMetrics(
     val rowHeight: Dp,
 )
 
+/**
+ * The companion's text a step smaller (-1): a one-screen device with a tall screen (SidePanel: the RP6's, the RP Nova's), where the
+ * companion lays out like the Thor's bottom screen and its main text read large. Only text bigger than the 1x secondary
+ * text shrinks - one font pixel, never below that size - so the pixel font stays crisp; GBA pixels (paddings) don't change.
+ */
+val LocalTextStep = androidx.compose.runtime.staticCompositionLocalOf { 0 }
+
+/**
+ * The top screen's activities (Library, Settings, setup) on a small window - a phone held upright (narrower than
+ * [COMPACT_WINDOW_WIDTH_DP]) or sideways (shorter than [COMPACT_WINDOW_HEIGHT_DP]): their main text a step smaller
+ * ([LocalTextStep]), so paragraphs wrap less and a pop-up's buttons stay on screen. The Thor's top screen is neither.
+ */
+@Composable
+fun CompactTextOnSmallWindows(content: @Composable () -> Unit) {
+    // The room the activity's content gets (its window, less the system bars), measured: ui-preview has no Configuration.
+    androidx.compose.foundation.layout.BoxWithConstraints(androidx.compose.ui.Modifier.fillMaxSize()) {
+        val small = maxWidth < COMPACT_WINDOW_WIDTH_DP.dp || maxHeight < COMPACT_WINDOW_HEIGHT_DP.dp
+        androidx.compose.runtime.CompositionLocalProvider(LocalTextStep provides if (small) -1 else LocalTextStep.current, content = content)
+    }
+}
+
+const val COMPACT_WINDOW_WIDTH_DP = 500
+const val COMPACT_WINDOW_HEIGHT_DP = 380
+
 /** [textScale]: text size relative to the frame's GBA pixel - 1.25 for the
  * main lists, 1 for denser secondary text (timestamps, paths, captions).
  * [wholePixels] false allows sizes between the whole-pixel steps (at the cost
@@ -54,13 +79,16 @@ fun rememberGbaTextMetrics(textScale: Float = 1.25f, wholePixels: Boolean = true
     // A game font with smaller letters than Pixel Operator's (Gen 1's 7px caps vs 9) is set larger -
     // except where a layout is sized to the line ([gameScaled] false: the tab chips, battle INFO).
     val gameScale = if (gameScaled) com.pokedaisy.app.companion.ui.theme.LocalGameTextScale.current else 1f
-    return remember(density, textScale, wholePixels, gameScale) {
+    val step = LocalTextStep.current
+    return remember(density, textScale, wholePixels, gameScale, step) {
         with(density) {
             val k = (20.dp.toPx() / 16f).roundToInt().coerceAtLeast(2)
             val scale = textScale * gameScale
             // ~textScale x, normally rounded to a whole number of screen pixels per font pixel.
-            val fontPx = if (wholePixels) 16f * (k * scale).roundToInt().coerceAtLeast(1)
-            else (16f * k * scale).roundToInt().toFloat()
+            var perPixel = if (wholePixels) (k * scale).roundToInt().coerceAtLeast(1).toFloat() else k * scale
+            // A big one-screen device ([LocalTextStep]): the bigger-than-1x text a font pixel down, not below 1x's.
+            if (step < 0 && scale > 1f) perPixel = maxOf(perPixel + step, k.toFloat())
+            val fontPx = if (wholePixels) 16f * perPixel else (16f * perPixel).roundToInt().toFloat()
             GbaTextMetrics(k, k.toDp(), fontPx.toSp(), fontPx / 16f, fontPx.toDp(), (fontPx * 1.25f).toDp())
         }
     }
@@ -90,8 +118,10 @@ fun GbaText(
     maxLines: Int = 1,
     /** Drawn twice, half a font pixel apart ([boldOffsetPx]): heavier strokes for a thin game font. */
     bold: Boolean = false,
+    /** Letters this much narrower (null: the game font's own, [gameFontScaleX]). */
+    scaleX: Float? = null,
 ) {
-    val scaleX = gameFontScaleX(m)
+    val scaleX = scaleX ?: gameFontScaleX(m)
     val style = gbaTextStyle(pixelFontFamily(), m, scaleX)
     val k = m.fontPixel.roundToInt()
     val b = if (bold) boldOffsetPx(m.fontPixel * scaleX) else 0

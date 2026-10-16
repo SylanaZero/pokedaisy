@@ -149,6 +149,19 @@ object PixelIcons {
         "...11....",
     )
 
+    /** A left arrow, cap-height of the pixel font: BACK in a title window. */
+    val arrowBack = listOf(
+        "....1......",
+        "...11......",
+        "..111......",
+        ".1111111111",
+        "11111111111",
+        ".1111111111",
+        "..111......",
+        "...11......",
+        "....1......",
+    )
+
     /** A five-pointed star: a favorite (the ITEMS tab's starred items). Cap-height of the pixel font. */
     val star = listOf(
         "....1....",
@@ -161,6 +174,14 @@ object PixelIcons {
         ".111.111.",
         ".11...11.",
     )
+
+    /** [star]'s outline alone: not a favorite (yet) - the Library's FAVORITE menu entry. */
+    val starOutline: List<String> = star.mapIndexed { y, row ->
+        String(CharArray(row.length) { x ->
+            fun on(xx: Int, yy: Int) = star.getOrNull(yy)?.getOrNull(xx) == '1'
+            if (on(x, y) && !(on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1))) '1' else '.'
+        })
+    }
 
     /** A Poké Ball, its top filled and its bottom an outline: a bag item the companion can USE / GIVE
      * (the ITEMS tab's row mark - for a Pokémon). Round, so it never reads as the favorites' [star];
@@ -175,6 +196,16 @@ object PixelIcons {
         "1.......1",
         ".1.....1.",
         "..11111..",
+    )
+
+    /** An arrow out to the top right, the "opens somewhere else" sign: a button that opens the game's own screen
+     * (the PC), not one of the companion's or the HUD's. A small corner mark, 5 GBA pixels square. */
+    val inGame = listOf(
+        "..111",
+        "...11",
+        "..1.1",
+        ".1...",
+        "1....",
     )
 
     /** A tick: something the companion did in the game went through (USE / GIVE). Cap-height like [star]. */
@@ -215,6 +246,19 @@ object PixelIcons {
 
     /** [cursorLeft] mirrored: a row that opens a page. */
     val cursorRight = cursorLeft.map { it.reversed() }
+
+    /** A right chevron, two pixels thick: a settings row that opens a page of its own (OptionLine's `chevron`). */
+    val chevronRight = listOf(
+        "11....",
+        "111...",
+        ".111..",
+        "..111.",
+        "...111",
+        "..111.",
+        ".111..",
+        "111...",
+        "11....",
+    )
 
     /** An empty party slot, for [PixelArt]: K rim, G fill. */
     val disc = listOf(

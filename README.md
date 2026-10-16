@@ -13,7 +13,7 @@
   <strong><a href="https://github.com/lidor30/pokedaisy/releases/latest">Download</a></strong>
   · <strong><a href="#features">Features</a></strong>
   · <strong><a href="#supported-games">Supported games</a></strong>
-  · <strong><a href="https://pokedaisy.web.app/docs/">Manual</a></strong>
+  · <strong><a href="https://pokedaisy.com/docs/">Manual</a></strong>
   · <strong><a href="https://github.com/lidor30/pokedaisy/issues">Report a problem</a></strong>
   · <strong><a href="https://buymeacoffee.com/lidor30g">Buy me a coffee</a></strong>
 </p>
@@ -21,7 +21,7 @@
 </div>
 
 PokeDaisy is a Game Boy, Game Boy Color and GBA player for dual-screen Android
-handhelds, made for Pokemon FireRed, LeafGreen, Emerald, Ruby, Sapphire, Yellow
+handhelds, made for Pokemon FireRed, LeafGreen, Emerald, Ruby, Sapphire, Yellow, Crystal
 and popular ROM hacks of every generation. The game runs on the top screen. The
 bottom screen is a live companion that reads your game as you play: your party, your bag, the map, battle matchups, your Pokedex, and a
 spoiler-free guide. Everything is drawn in the game's own menu style.
@@ -69,7 +69,7 @@ controls fill the space between the game and the companion.
    - **Add cover art** (optional) with a free [SteamGridDB](https://www.steamgriddb.com) API key.
 
 You can change all of this later in Settings. The full manual is at
-[pokedaisy.web.app/docs](https://pokedaisy.web.app/docs/), and inside the app under Settings > HELP.
+[pokedaisy.com/docs](https://pokedaisy.com/docs/), and inside the app under Settings > HELP.
 
 **No games are included.** Use your own legally dumped ROMs.
 
@@ -119,9 +119,10 @@ Pick which tabs sit in the tab bar in the companion's Settings.
 <details>
 <summary><strong>Languages</strong></summary>
 
-The app's own text comes in English, Japanese, French, German, Italian and Spanish. By default it
-follows the ROM's language (the device's in the Library); pick another under LANGUAGE in either
-Settings screen. Species, move and item names and the GUIDE pages stay as the game has them
+The app's own text comes in English, Japanese, French, German, Italian, Spanish and Portuguese
+(Brazil's and Portugal's). By default it follows the ROM's language (the device's in the Library;
+no game is in Portuguese, so a Portuguese device keeps Portuguese over an English game); pick another
+under LANGUAGE in either Settings screen. Species, move and item names and the GUIDE pages stay as the game has them
 (a translated hack's in its language; Quetzal's in the ones its own IDIOMA options pick).
 
 </details>
@@ -139,12 +140,19 @@ Settings screen. Species, move and item names and the GUIDE pages stay as the ga
 - **Rewind** (optional, Settings > REWIND): hold the REWIND HOLD hotkey (R on a keyboard; pick a pad button in
   HOTKEYS) to play the last ~20 seconds backwards. It never touches your save file.
 - **Status bar** (optional): game, location, money, clock and battery above the game.
+- **HUD** (Settings > HUD, on by default): your party (levels, HP, status), a minimap, your Poké Balls and
+  BAG / WILD buttons on the game screen while you walk around, like a modern Pokémon game. A tap opens a Pokémon's
+  summary, the whole map (with FLY), a compact bag with USE, or the area's wild Pokémon; the game keeps running under
+  them. Three layouts (corners, side rails, a bottom dock), two looks (see-through glass or the app's windows), three
+  sizes, and each part can be hidden. It steps aside for battles, menus and (with EXPAND) conversations.
+- **Battle buttons** (one screen, Settings > BATTLE BUTTONS, on by default): FIGHT, POKéMON and RUN at the top right,
+  beside the battle. FIGHT opens your moves and POKéMON your party in a window, as on the BATTLE tab.
 - **Aspect**: the game's own shape (the GBA's 3:2, the Game Boy's 10:9), stretched to fill a 16:9 top screen, or **EXPAND**: the overworld drawn past the
   GBA's edges - beside the game on a wide screen, above and below it on a phone held upright - so the screen shows
   more of the map with the pixels kept square (FireRed, LeafGreen, Emerald, Ruby and
   Sapphire, every language and revision, plus Unbound, Radical Red, Lazarus, SoulGold, Heart and Soul, Gaia, Odyssey,
   Amethyst 1.3.0, Glazed, Seaglass, Emerald Imperium, Emerald Rogue, Too Many Types 2, Recharged Yellow, Super Mariomon,
-  Ultra Violet, Sword and Shield Ultimate Plus and Celia's hack).
+  Ultra Violet, FireRed Rocket Edition, Ash Gray, Sword and Shield Ultimate Plus, GS Chronicles and Celia's hack).
   The extra strips are rebuilt every frame from the game's own map, tiles and sprites. Battles are wide too: their
   scenery runs on past the edges and the battlers, trainers and healthboxes slide in from off screen. Fog, ash and rain
   reach the screen's edges, and dark caves stay dark around Flash's light. On the title
@@ -232,10 +240,14 @@ shows a "not supported" notice).
 | Game                           | Version                    | Party | Bag | Battle | Map |   Dex   | Guide |
 | ------------------------------ | -------------------------- | :---: | :-: | :----: | :-: | :-----: | :---: |
 | Yellow (GB)                    | USA/Europe                 |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   —   |
+| Yellow (GB)                    | DE / FR / IT / ES          |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   —   |
+| Crystal (GBC)                  | USA, USA/Europe rev 1, AU  |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   —   |
+| Crystal Clear (GBC)            | 2.5.11, 2.6.0 (4 builds)   |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   —   |
+| Prism (GBC)                    | 0.95 build 254             |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   —   |
 | FireRed                        | USA/Europe, rev 0 and 1    |  ✅   | ✅  |   ✅   | ✅  |   ✅    |  ✅   |
 | FireRed                        | ES / DE / FR / IT / JP     |  ✅   | ✅  |   ✅   | ✅  |   ✅    |  ✅   |
 | LeafGreen                      | USA/Europe, rev 0 and 1    |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
-| LeafGreen                      | ES / FR / IT / JP          |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
+| LeafGreen                      | ES / DE / FR / IT / JP     |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Emerald                        | USA/Europe                 |  ✅   | ✅  |   ✅   | ✅  |   ✅    |  ✅   |
 | Emerald                        | ES / DE / FR / IT / JP     |  ✅   | ✅  |   ✅   | ✅  |   ✅    |  ✅   |
 | Ruby                           | USA, rev 0, 1 and 2        |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
@@ -252,8 +264,12 @@ shows a "not supported" notice).
 | Celia's Stupid Romhack         | 1.1.4                      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Orange Islands                 | Beta 5.7, an older beta    |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Ultra Violet                   | 1.22                       |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
+| FireRed Rocket Edition         | the one release            |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
+| Ash Gray                       | 4.5.3, Fork Bug Fix 1.0    |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Sword and Shield Ultimate Plus | 1.2.1.2 + its 3 patches    |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
+| GS Chronicles                  | 2.7.6                      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Recharged Yellow               | 1.8.0, 1.9.0, 1.9.4, 1.9.7 |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
+| Emerald Legacy                 | 1.1.4                      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |  ✅   |
 | Lazarus                        | 2.0                        |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Emerald Seaglass               | 3.0                        |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Too Many Types 2               | 1.5.2                      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
@@ -261,7 +277,10 @@ shows a "not supported" notice).
 | Emerald Imperium               | 1.3.1                      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Quetzal                        | English Alpha 9 v0         |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Quetzal                        | Spanish Alpha 9 v0         |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
+| Quetzal                        | Alpha 0.8.4 (EN / ES)      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
+| Moemon Quetzal                 | Alpha 0.8.4 Hotfix (EN/ES) |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Super Mariomon                 | 1.2.1-1.3, 1.5.1, 1.5.2    |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
+| Recharged Emerald              | 2.2.5, 2.2.8, Rebalanced   |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | Emerald Rogue                  | 2.2.1-EX                   |  ✅   | ✅  |   ✅   | ✅  |   ✅    |   —   |
 | SoulGold                       | 1.1.4, 1.2 (3 builds)      |  ✅   | ✅  |   ◐    | ✅  |   ✅    |   ◐   |
 | R.O.W.E.                       | 2.1.9.1 Experimental       |  ✅   | ✅  |   ◐    | ✅  |    ◐    |   —   |
@@ -269,8 +288,10 @@ shows a "not supported" notice).
 <details>
 <summary><strong>Notes on the table</strong></summary>
 
-Yellow is the first Game Boy game the companion reads,
-in the game's own look (its font, icons and town map, rebuilt from your ROM).
+Yellow, Crystal and the Crystal hacks Crystal Clear and Prism are the Game Boy games the companion reads,
+each in the game's own look (its font, icons and town maps, rebuilt from your ROM). The German,
+French, Italian and Spanish Yellows show their own names, Pokédex pages and battle words. Prism
+shows its own Pokémon, moves, types, six town maps and its own Pokédex (its 253 in the game's order).
 Map ◐ means place names
 only, without the map picture. Guide ◐ means the live pages only (the wild encounters here and the next
 boss), without the area lists. Battle ◐ means the battle panes work but haven't

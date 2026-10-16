@@ -2,7 +2,7 @@
 title: Cheats
 summary: Add GameShark, Action Replay and CodeBreaker codes to a GBA game, and switch them on and off while you play.
 section: player
-order: 4
+order: 5
 keywords: [gameshark, action replay, codebreaker, codes, cht, ar, gs, money, shiny, walk through walls]
 ---
 
@@ -17,7 +17,7 @@ There's one master switch, `CHEATS`, and it starts `OFF`. While it's off, no cod
 You'll find it in two places:
 
 - **Top screen:** Settings > `CHEATS`, in the `LIBRARY` group.
-- **Companion:** `SETTINGS` > `CHEATS`, in the `GAME` group. The row shows `OFF`, or how many of this game's cheats are on (for example `2 ON`).
+- **Companion:** `SETTINGS` > `CHEATS`, in the `GAMEPLAY` group. The row shows `OFF`, or how many of this game's cheats are on (for example `2 ON`).
 
 ## Add a code
 

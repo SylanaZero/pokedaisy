@@ -38,6 +38,8 @@ class SettingRow(
     val subtitle: String? = null,
     /** Hidden words Settings' search also matches (English, space-separated): the terms players use elsewhere. */
     val keywords: String = "",
+    /** The row opens a page of its own (not a pick-list): a pixel chevron at its right end. */
+    val opensPage: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -90,15 +92,22 @@ val SETTING_KEYWORDS: Map<String, String> = mapOf(
     "REWIND" to "rewind undo go back time",
     "TOUCH PAD" to "on screen controls virtual gamepad overlay touch buttons",
     "GAME BUTTONS" to "key bindings keybinds keybinding controls remap remapping rebind mapping input controller gamepad buttons turbo",
-    "HOTKEYS" to "shortcuts combos save state load state slot rewind fast forward key bindings",
+    "HOTKEYS" to "shortcuts combos save state load state slot rewind fast forward key bindings restart close quit exit app",
+    "QUICK MENU" to "radial ring wheel circle grid style labels names icons only shortcut actions pc fly repel super max bike bicycle get off dismount rod fishing wild encounters save load state fast forward l3 thumb stick",
     "STATUS BAR" to "clock time battery money location top bar",
+    "BATTLE BUTTONS" to "battle buttons moves fight switch run flee side touch single screen one screen expand widescreen",
+    "HUD" to "field hud heads up display overlay party minimap mini map balls bag wild encounters overworld legends single screen",
     "ASPECT" to "stretch ratio fullscreen full screen size scale 3:2 wide widescreen 16:9 expand zoom",
     "AUTO ZOOM IN" to "expand wide zoom close-up closeup dialogue conversation sign menu text box pull in automatic",
     "SHADERS" to "filter lcd crt scanlines grid gba colors color correction effects screen look smoothing xbr xbrz scalefx upscale hd edges",
     "SMOOTHING" to "xbr xbrz scalefx upscale upscaler hd edges smooth anti alias filter",
     "OVERLAY" to "overlay overlays border borders bezel bezels frame skin retroarch background wallpaper decoration",
     "COMPANION" to "portrait phone bottom position layout",
+    "COMPANION VIEW" to "single screen one screen window modal popup middle center side panel docked layout",
     "SWAP SCREENS" to "dual screen display switch top bottom",
+    "SINGLE SCREEN" to "one screen single screen dual screen multitask multitasking second screen free other apps window modal popup",
+    "SPEED OPTIONS" to "scene speeds battle speed text speed menu speed ff mode ff music fast forward smart steady",
+    "DISPLAY OPTIONS" to "status bar shaders filter overlay border frame companion position portrait",
     "THEME" to "colors look background skin style",
     "FPS / CPU" to "fps frame rate framerate cpu usage performance speed overlay counter 60",
     "DARK MODE" to "dark night black theme light colors appearance auto system",
@@ -108,7 +117,7 @@ val SETTING_KEYWORDS: Map<String, String> = mapOf(
     "HIDDEN GAMES" to "hide unhide library show",
     "CHEATS" to "gameshark action replay codebreaker codes",
     "RetroAchievements" to "achievements cheevos ra login account trophies",
-    "LANGUAGE" to "language translation locale english japanese french german italian spanish",
+    "LANGUAGE" to "language translation locale english japanese french german italian spanish portuguese português brazil brasil portugal idioma",
     "VERSION" to "update upgrade check release about",
     "CRASH REPORTS" to "crash report bug crashlytics privacy diagnostics send",
     "LICENSES" to "license legal open source credits notices about",
@@ -118,6 +127,10 @@ val SETTING_KEYWORDS: Map<String, String> = mapOf(
     "FOE IVS" to "enemy opponent ivs stats",
     "CLICK SOUND" to "sound effects button click audio",
     "TWEAKS" to "animations bounce blink cursor jump to battle effects motion",
+    "SCENE SPEEDS" to "battle speed text speed instant text fast text menu speed overworld speed faster battles quality of life qol bike speed surf speed faster bike faster surfing",
+    "AUTO-RUN" to "auto run autorun running shoes run sprint dash always run hold b",
+    "RUN INDOORS" to "run inside buildings indoor running shoes houses",
+    "WILD ENCOUNTERS" to "wild encounters encounter rate random battles grass caves repel no encounters fewer battles",
 )
 
 private fun fold(s: String): String =
@@ -147,6 +160,8 @@ fun GroupedRows(
     onRevealed: () -> Unit = {},
     /** Given to the first row (not a group title): where D-pad focus starts. */
     firstRowFocus: androidx.compose.ui.focus.FocusRequester? = null,
+    /** Row i took the D-pad's focus: the cursor follows it, so only one row is white. */
+    onFocused: ((Int) -> Unit)? = null,
     footer: @Composable () -> Unit = {},
 ) {
     val firstRow = rows.indexOfFirst { !it.header }
@@ -174,10 +189,14 @@ fun GroupedRows(
                 OptionLine(
                     row.label, row.value, selected = i == cursor, m,
                     modifier = (if (i == reveal) Modifier.revealOnce(onRevealed) else Modifier)
-                        .then(if (i == firstRow && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier),
+                        .then(if (i == firstRow && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier)
+                        // The companion's window: the D-pad starts on the cursor row.
+                        .focusStart(i == cursor),
                     height = if (row.subtitle != null) m.rowHeight * 1.2f + m.lineHeight else m.rowHeight * 1.2f,
                     divider = rows.getOrNull(i + 1)?.header == false, labelBadge = row.labelBadge, labelIcon = row.labelIcon,
                     valueBadge = row.badge, enabled = row.enabled, subtitle = row.subtitle, labelWeight = labelWeight,
+                    chevron = row.opensPage,
+                    onFocus = onFocused?.let { f -> { f(i) } },
                 ) { onClick(i) }
             }
         }

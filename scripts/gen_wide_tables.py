@@ -124,8 +124,14 @@ HACKS = [
     dict(name="Orange Islands", sha1="8bac897de515f88e6ce92d0712ce2c018a394b37", family="FR", mapped=True,
          pending="the top tile row differs once the walk turns north (half the walk frames)",
          save="orange_islands", a=dict(MAP_GROUPS=0x083526A8, **cfru(0x08801C80, 0x081A2000, 0x4080))),
+    # Beta 5.7: the same RAM and tables as the build above (every address shared, checked headless on the same save).
+    dict(name="Orange Islands Beta 5.7", sha1="d2e3800e69e44c9649c3d9a15dc1cd12c1d90501", family="FR", mapped=True,
+         pending="as Orange Islands",
+         save="orange_islands", a=dict(MAP_GROUPS=0x083526A8, **cfru(0x08801C80, 0x081A2000, 0x4080))),
     dict(name="Celia's Stupid Romhack v1.1.4", sha1="3cbd5a2e72ce60cfae1e0c28d83e01f855c51537", family="FR",
-         mapped=True, save="celia", a=dict(MAP_GROUPS=0x089DCD7C)),
+         mapped=True, save="celia", a=dict(MAP_GROUPS=0x089DCD7C,
+         # FireRed's ScriptContext2_Enable / _Disable / _IsEnabled, moved with the rest (0x080765C8): the field reads'.
+         CONTROLS_LOCKED=0x03000FA4)),
     *[dict(name=f"Sword and Shield Ultimate Plus{v}", sha1=sha, family="FR", mapped=True, save=save,
            a=dict(MAP_GROUPS=0x087B1010, **cfru(0x08EB1000, 0x094BBFCC), **CFRU_FLAGS))
       for v, sha, save in [("", "afe4c8e0f9c7186860fcea5f25d8318f5d7929b9", "sword_shield_up"),
@@ -133,14 +139,42 @@ HACKS = [
                            (" (performance)", "4858cc3d7b335bb5eed553861d7a4a17bad9ce2c", "sword_shield_up_performance"),
                            (" (casual, performance)", "932323d1fa3732d8673d1319fa86ed4df41087b9",
                             "sword_shield_up_casual_performance")]],
+    # GS Chronicles: CFRU's graphics lookup (FireRed's GetObjectEventGraphicsInfo hooked to 0x09C84B31, whose pool
+    # names table 0 and the table of tables) and its flags; gMapGroups is FireRed's, rewritten in place.
+    # Its primary tilesets hold 512 metatiles, not FireRed's 640 (each tileset's metatiles run 0x2000 bytes to its
+    # attributes). It boots through its own splash (boot_file) and uses 0x0203FF00, so the check's battle script goes
+    # elsewhere.
+    dict(name="GS Chronicles v2.7.6", sha1="25f8840ecb58e584edf18ffde35f845e94f3f17c", family="FR", mapped=True,
+         save="gs_chronicles", boot_file="gs_chronicles.txt", script_ram=0x0203F400,
+         a=dict(MAP_GROUPS=0x083526A8, PRIMARY_OVERRIDE=512, **cfru(0x081C68F4, 0x09D0C80C), **CFRU_FLAGS)),
     dict(name="Ultra Violet v1.22", sha1="3b6c51d8fb6b513bdd01b7bda3ed8965bc985d58", family="FR", mapped=True,
          save="ultra_violet", a=dict(MAP_GROUPS=0x0872AF04, OBJ_GFX_INFO=0x08741100)),
+    # FireRed Rocket Edition and Ash Gray: FireRed rev 0 edited in place, booted with retail FireRed's save (their own
+    # quest log recap needs firered_hack.txt's B presses). Both moved the object palettes (mapped from the pools).
+    dict(name="FireRed Rocket Edition", sha1="033d05374ae34eb84fae62c693ca8f3da23dd1bd", family="FR", mapped=True,
+         save="rocket_edition", boot_file="firered_hack.txt", a=dict(MAP_GROUPS=0x083526A8, OBJ_GFX_INFO=0x0839FDB0)),
+    *[dict(name=f"Ash Gray {v}", sha1=sha, family="FR", mapped=True, save=save, boot_file="firered_hack.txt",
+           a=dict(MAP_GROUPS=0x0873E2F4, OBJ_GFX_INFO=0x0839FDB0))
+      for v, sha, save in [("v4.5.3", "1ee1557db1e4c2e0e94c6306efcc40506bc40cc9", "ash_gray"),
+                           ("Fork Bug Fix v1.0", "92ed82145c013069472153391c7aab1cfbf37b75", "ash_gray_fork")]],
     # Binary Emerald hacks: Emerald's code, mapped the same way.
     dict(name="Glazed 9.2.0", sha1="e10105d8544469c6a11ca2cf510289981df3c3b0", family="EM", mapped=True,
          save="glazed", a=dict(MAP_GROUPS=0x08486578)),
     # Emerald Kaizo: retail Emerald edited in place (95% byte for byte); no save of its own - retail's boots in it.
     dict(name="Emerald Kaizo v2.0", sha1="a7c4e34fafb53f2d5283eb6d43dad285c0dd40a8", family="EM", mapped=True,
          save="emerald_kaizo", a=dict(MAP_GROUPS=0x08486578)),
+    # Emerald Legacy v1.1.4: pokeemerald rebuilt from its own source (agbcc, = the release byte for byte): every address
+    # is its ELF's symbol. Emerald's map and sprites with ghoulslash's overworld expansion - ObjectEvent.spriteId at
+    # +0x23, a u16 graphicsId at +2 of a template (its kind at +1, as Rogue's), 300 graphics records then the
+    # VAR_OBJ_GFX_ID_* ids from 301 - so the EX family; SaveBlock1 grew (templates 0xDD8, vars 0x1510: offsetof).
+    dict(name="Emerald Legacy v1.1.4", sha1="cbd71af65ee3dcd53280a6a12014bfb11e8f626a", family="EX",
+         save="emerald_legacy", script=0x0809A294, a=dict(
+             VMAP=0x03005FA0, MAP_HEADER=0x020374A4, MAP_GROUPS=0x084AF90C, SAVE_BLOCK1_PTR=0x03005F6C,
+             CAMERA_OFFSET=0x03000E20, OBJECT_EVENTS=0x020374DC, SPRITES=0x02020630, COORD_OFFSET=0x02021BBC,
+             COORD_OFFSET_Y=0x02021BBE, SPRITE_ORDER=0x020217F4, GMAIN=0x030024A0, CONTROLS_LOCKED=0x03000F2C,
+             OBJ_GFX_INFO=0x085353B0, OBJ_PALETTES=0x0853C4B4, OBJ_FACING=0x0853535D, ELEVATION_PRIO=0x0853F004,
+             SPRITE_PAL_TAGS=0x03000CF0, OBJ_GFX_VAR_FROM=301, OBJ_GFX_COUNT=300, TEMPLATE_KIND_AT=1,
+             SB1_OFFSETS=0xDD8 | 0x1510 << 16)),
     # R.O.W.E.: Emerald's code (mapped), its own maps - 12-bit metatile ids (elevation in the top 4 bits) and a 2048-
     # metatile primary tileset; gSprites moved (find_wide_addrs.py).
     dict(name="R.O.W.E. v2.1.9.1", sha1="81bd0f4bfa1c04ab2c6faab1bddd10e8a390ea77", family="EM", mapped=True,
@@ -399,6 +433,7 @@ def main():
                      addrs={k: (f"{v:#010x}" if v is not None else None) for k, v in addrs.items()}, votes=votes,
                      script=f"{script:#010x}" if script else None, missing=missing, save=hack["save"] if hack else None,
                      boot=hack.get("boot", []) if hack else [], boot_file=hack.get("boot_file") if hack else None,
+                     script_ram=hack.get("script_ram") if hack else None,
                      name=hack["name"] if hack else None)
         report.append(entry)
         if hack and hack.get("pending"):
@@ -423,13 +458,19 @@ def main():
         "    int32_t a[PK_WIDE_ADDRS];",
         "} PK_WIDE_ROMS[] = {",
     ]
-    for e in out:
+    def row(e):
         vals = ", ".join(e["addrs"][s] for s in SLOTS)
-        if e.get("pending"):   # checked by verify_wide.py (its build defines PK_WIDE_PENDING), never in the app
-            lines.append("#ifdef PK_WIDE_PENDING")
-        lines.append(f"    {{ 0x{e['crc']}, PK_WIDE_FAMILY_{e['family']}, {{ {vals} }} }},   // {e['name'] or f"{e['code']} rev {e['rev']}"}: {e['file']}")
-        if e.get("pending"):
-            lines.append("#endif")
+        return f"    {{ 0x{e['crc']}, PK_WIDE_FAMILY_{e['family']}, {{ {vals} }} }},   // {e['name'] or f"{e['code']} rev {e['rev']}"}: {e['file']}"
+    lines += [row(e) for e in out if not e.get("pending")]
+    lines += ["};", ""]
+    # Pending hacks: checked by verify_wide.py (its build defines PK_WIDE_PENDING, which lets WIDE draw them); the app
+    # reads their field with them (SCENE SPEEDS' TEXT, AUTO-RUN, RUN INDOORS, WILD ENCOUNTERS: pk_field_configure).
+    lines += [
+        "// Hacks WIDE doesn't draw yet (`pending` in gen_wide_tables.py): only the field reads use them, unless",
+        "// PK_WIDE_PENDING (verify_wide.py's build) lets WIDE draw them too.",
+        "static const struct PkWideRom PK_FIELD_ONLY_ROMS[] = {",
+    ]
+    lines += [row(e) for e in out if e.get("pending")] or ["    { 0, 0, { 0 } },"]
     lines += ["};", ""]
     open(OUT_H, "w").write("\n".join(lines))
     pending = sum(1 for e in out if e.get("pending"))

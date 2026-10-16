@@ -70,7 +70,14 @@ data class GuideTables(
      * nibble and the normal one's in the low (Recharged Yellow); -1 = none. A trainer id or'd with
      * 1 << [TRAINER_TABLE_SHIFT] reads it. */
     val trainerHardPartyOff: Int = -1,
+    /** Maps (group << 8 | num) with more than one wild header back to back, and the var whose value picks one:
+     * GetCurrentMapWildMonHeaderId's `i += VarGet(VAR_*_WILD_SET)` after the map's first header (Emerald Legacy). */
+    val wildSetVars: Map<Int, Int> = emptyMap(),
 )
+
+/** Which of map [group].[num]'s back-to-back wild headers the game reads now ([GuideTables.wildSetVars]); 0 = the first. */
+fun GuideTables.wildSetOf(group: Int, num: Int, p: SaveProgress?): Int =
+    wildSetVars[group shl 8 or num]?.let { p?.variable(it) } ?: 0
 
 /** A WildPokemonHeader's size and the pointer slot (after the 4-byte map id) of each method. */
 data class WildLayout(val stride: Int, val land: Int = 0, val water: Int = 1, val rockSmash: Int = 2, val fishing: Int = 3)
@@ -284,18 +291,19 @@ object GuideRomSource {
         }
     }
 
-    fun cachedEncounters(t: GuideTables, group: Int, num: Int): MapEncounters? =
-        if (cachedFor == t) encounters[group shl 8 or num] else null
+    fun cachedEncounters(t: GuideTables, group: Int, num: Int, set: Int = 0): MapEncounters? =
+        if (cachedFor == t) encounters[group shl 8 or num or (set shl 16)] else null
 
     fun cachedParty(t: GuideTables, trainer: Int): List<TrainerMon>? = if (cachedFor == t) parties[trainer] else null
 
-    /** The wild Pokémon of map [group].[num] - empty when it has none. */
-    fun encounters(t: GuideTables, group: Int, num: Int): MapEncounters? {
+    /** The wild Pokémon of map [group].[num] - empty when it has none. [set]: which of its back-to-back headers
+     * ([GuideTables.wildSetOf]). */
+    fun encounters(t: GuideTables, group: Int, num: Int, set: Int = 0): MapEncounters? {
         sync(t)
         val key = group shl 8 or num
-        encounters[key]?.let { return it }
+        encounters[key or (set shl 16)]?.let { return it }
         return runCatching {
-            val hdr = headerIndex(t)[key]
+            val hdr = headerIndex(t)[key]?.let { alternateHeader(t, it, set) }
                 ?: return@runCatching MapEncounters(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
             val h = rd(hdr, wildHeaderStride(t))
             // Each method from the chosen time of day, or the first set that has it.
@@ -312,7 +320,25 @@ object GuideRomSource {
                 superRod = merge(fishing.drop(5), SUPER_ROD_ODDS),
             )
         }.onFailure { android.util.Log.w("pokedaisy", "encounters $group.$num failed", it) }
-            .getOrNull()?.also { encounters[key] = it }
+            .getOrNull()?.also { encounters[key or (set shl 16)] = it }
+    }
+
+    /** The header [set] places after the map's first ([first]), as the game counts them - only while it's still
+     * this map's (a var out of range keeps the first rather than read another map's). */
+    private fun alternateHeader(t: GuideTables, first: Long, set: Int): Long {
+        if (set <= 0) return first
+        val id = rd(first, 2)
+        val alt = first + set.toLong() * wildHeaderStride(t)
+        return if (rd(alt, 2).contentEquals(id)) alt else first
+    }
+
+    /** How many headers in a row map [group].[num] has (1 but for [GuideTables.wildSetVars]' maps). */
+    private fun headerRun(t: GuideTables, group: Int, num: Int): Int {
+        if ((group shl 8 or num) !in t.wildSetVars) return 1
+        val first = headerIndex(t)[group shl 8 or num] ?: return 1
+        var n = 1
+        while (n < 8 && alternateHeader(t, first, n) != first) n++
+        return n
     }
 
     /** Every map with a wild header, as group << 8 | num (the DEX's AREA index walks them). */
@@ -322,9 +348,12 @@ object GuideRomSource {
     }
 
     /** Map [group].[num]'s wild Pokémon in each of its time-of-day sets ([GuideTables.wildSets]),
-     * each set alone (no fallback to the others, unlike [encounters]); not cached. */
+     * each set alone (no fallback to the others, unlike [encounters]); not cached. A map with
+     * back-to-back headers ([GuideTables.wildSetVars]) lists each header's. */
     fun encounterSets(t: GuideTables, group: Int, num: Int): List<MapEncounters> {
         sync(t)
+        val run = headerRun(t, group, num)
+        if (run > 1) return (0 until run).mapNotNull { encounters(t, group, num, it) }
         val hdr = headerIndex(t)[group shl 8 or num] ?: return emptyList()
         val h = rd(hdr, wildHeaderStride(t))
         val sets = if (t.wildLayout != null) 1 else t.wildSets
@@ -625,6 +654,40 @@ val GUIDE_TABLES_AMETHYST_V1_4_1 = GUIDE_TABLES_AMETHYST.copy(
 // stats, TM compatibility) - only gWildMonHeaders moved, to 0x08E3D4A4 (all 13 literal-pool refs).
 val GUIDE_TABLES_EMERALD_KAIZO = GUIDE_TABLES_EMERALD.copy(wildHeaders = 0x08E3D4A4L)
 
+// Pokémon Emerald Legacy v1.1.4: its own build's tables (its ELF's symbols). SaveBlock1's flags / vars moved past the
+// 120-slot ITEMS pocket and grew (960 trainer flags push the system flags to 0x8C0: offsetof / constants compiled with
+// agbcc against its headers). Its trainers keep retail's ids (ROXANNE 265), the new ones from 855. Some maps carry a
+// second set of wild Pokémon in the header after their first, picked by a var (wild_encounter.c's
+// GetCurrentMapWildMonHeaderId), listed here by map.
+val GUIDE_TABLES_EMERALD_LEGACY = GUIDE_TABLES_EMERALD.copy(
+    trainers = 0x083380E8L,
+    learnsets = 0x083522A8L,
+    wildHeaders = 0x08585028L,
+    sb1FlagsOff = 0x13D8,
+    sb1VarsOff = 0x1510,
+    flagBytes = 0x138,
+    varCount = 0x101,
+    // One struct TrainerMon for every party (its "trainer control"): nickname, IVs / EVs, lvl +0x19, species +0x1A,
+    // heldItem +0x1C, moves +0x1E (none = the level-up moves, as CreateNPCTrainerParty does), 0x2C bytes.
+    trainerMon = TrainerMonLayout(stride = 0x2C, movesOff = 0x1E, speciesOff = 0x1A, itemOff = 0x1C, levelOff = 0x19),
+    guide = GuideId.EMERALD_LEGACY,
+    mapGroups = 0x084AF90CL,
+    wildSetVars = mapOf(
+        (0 shl 8 or 16) to 0x40F7, (0 shl 8 or 17) to 0x40F8, (0 shl 8 or 18) to 0x40F9, (0 shl 8 or 19) to 0x40FA, // ROUTE 101-104
+        (0 shl 8 or 25) to 0x40FB, (0 shl 8 or 26) to 0x40FC, (0 shl 8 or 27) to 0x40FD, (0 shl 8 or 29) to 0x40FE, // 110, 111, 112, 114
+        (0 shl 8 or 31) to 0x40FF, (0 shl 8 or 32) to 0x40E5, (0 shl 8 or 22) to 0x409B, (0 shl 8 or 30) to 0x4091, // 116, 117, 107, 115
+        (0 shl 8 or 34) to 0x4083, (0 shl 8 or 35) to 0x4081, (0 shl 8 or 36) to 0x4080, (0 shl 8 or 37) to 0x407F, // 119-122
+        (0 shl 8 or 38) to 0x407E, (0 shl 8 or 46) to 0x4076, (0 shl 8 or 48) to 0x4075, // 123, 131, 133
+        (0 shl 8 or 1) to 0x406D, (0 shl 8 or 6) to 0x406C, (0 shl 8 or 0) to 0x406B, (0 shl 8 or 7) to 0x4068, // SLATEPORT, MOSSDEEP, PETALBURG, SOOTOPOLIS
+        (24 shl 8 or 11) to 0x40DB, (24 shl 8 or 4) to 0x40DC, (24 shl 8 or 7) to 0x40BB, (24 shl 8 or 8) to 0x40B8, // PETALBURG WOODS, RUSTURF, GRANITE 1F / B1F
+        (24 shl 8 or 43) to 0x40A8, (24 shl 8 or 44) to 0x4073, (24 shl 8 or 45) to 0x4070, // VICTORY ROAD 1F / B1F / B2F
+        (24 shl 8 or 14) to 0x40A1, (24 shl 8 or 13) to 0x409D, (24 shl 8 or 53) to 0x408B, // FIERY PATH, JAGGED PASS, NEW MAUVILLE
+        (24 shl 8 or 16) to 0x407C, (24 shl 8 or 17) to 0x407A, (24 shl 8 or 18) to 0x4079, (24 shl 8 or 19) to 0x4078, // MT. PYRE 2F-5F
+        (24 shl 8 or 21) to 0x4077, (24 shl 8 or 0) to 0x406E, (24 shl 8 or 83) to 0x406A, (24 shl 8 or 99) to 0x4067, // MT. PYRE outside, METEOR FALLS, SHOAL CAVE ice, ARTISAN CAVE
+        (24 shl 8 or 47) to 0x4066, // SHOAL CAVE inner room
+    ),
+)
+
 // Pokémon Glazed: retail Emerald's gTrainers / gLevelUpLearnsets at retail's addresses (its literal
 // pools still name them), its gWildMonHeaders repointed to 0x094CA3F4 (all 13 refs); retail's
 // SaveBlock1 flags / vars. Its first gym leader, SPARKY, holds ROXANNE's slot.
@@ -705,6 +768,27 @@ val GUIDE_TABLES_QUETZAL_ES = GUIDE_TABLES_QUETZAL.copy(
     probeName = "PETRA",
     altTrainers = listOf(0x0998AE7CL, 0x099963D0L),
     mapGroups = 0x08934070L,
+)
+
+// Quetzal Alpha 0.8.4 (English / Spanish, and their Moemon Hotfix builds): Alpha 9's record shapes for Hoenn alone - no
+// Johto / Kanto trainer tables or map groups (34 groups, 124 wild headers). gTrainers, gWildMonHeaders and gMapGroups
+// through Alpha 9's literal pools; 265 is ROXANNE (PETRA), 961 her HARD twin, as in Alpha 9.
+val GUIDE_TABLES_QUETZAL_V084 = GUIDE_TABLES_QUETZAL.copy(
+    trainers = 0x08406948L,
+    wildHeaders = 0x08F34160L,
+    guide = GuideId.QUETZAL_V084,
+    altTrainers = emptyList(),
+    mapGroups = 0x0861310CL,
+    altMapSecGroups = null,
+)
+val GUIDE_TABLES_QUETZAL_V084_ES = GUIDE_TABLES_QUETZAL_V084.copy(
+    trainers = 0x0840EB18L, wildHeaders = 0x08F3C278L, probeName = "PETRA", mapGroups = 0x0861B224L,
+)
+val GUIDE_TABLES_QUETZAL_MOEMON_V084 = GUIDE_TABLES_QUETZAL_V084.copy(
+    trainers = 0x08406A48L, wildHeaders = 0x08F34144L, mapGroups = 0x086130F0L,
+)
+val GUIDE_TABLES_QUETZAL_MOEMON_V084_ES = GUIDE_TABLES_QUETZAL_V084_ES.copy(
+    trainers = 0x0840EC18L, wildHeaders = 0x08F3C25CL, mapGroups = 0x0861B208L,
 )
 
 // The four below from their release ROMs (expansion 1.9.4 / 1.9.2 / 1.12.3 / 1.15.2 per their RHHEXP
@@ -793,6 +877,21 @@ val GUIDE_TABLES_ULTRA_VIOLET = GuideTables(
     mapGroups = 0x0872AF04L,
 )
 
+/** FireRed Rocket Edition: rev 0's tables and maps, its own story's guide (GuideRocketEdition.kt). */
+val GUIDE_TABLES_ROCKET_EDITION = GUIDE_TABLES_ULTRA_VIOLET.copy(
+    wildHeaders = 0x083C9CB8L,
+    guide = GuideId.ROCKET_EDITION,
+    mapGroups = 0x083526A8L,
+    probeName = "Brock",   // its text is mixed case
+)
+
+/** Pokémon Ash Gray: rev 0's gTrainers / learnsets, its own gWildMonHeaders and gMapGroups (all their literal-pool words). */
+val GUIDE_TABLES_ASH_GRAY = GUIDE_TABLES_ULTRA_VIOLET.copy(
+    wildHeaders = 0x088CD1F8L,
+    guide = GuideId.ASH_GRAY,
+    mapGroups = 0x0873E2F4L,
+)
+
 /**
  * Pokémon Sword and Shield Ultimate Plus (CFRU): gTrainers rewritten in place at FireRed rev
  * 0's address (trainer 414 is MILO), CFRU's 3-byte learnsets at 0x099F4D98, gWildMonHeaders
@@ -807,6 +906,23 @@ val GUIDE_TABLES_SWORD_SHIELD = GuideTables(
     probeName = "Milo",
     guide = GuideId.SWORD_SHIELD,
     mapGroups = 0x087B1010L,
+)
+
+/**
+ * Pokémon GS Chronicles v2.7.6 (CFRU): gTrainers rewritten in place at FireRed rev 0's address
+ * (trainer 321 is FALKNER), CFRU's 3-byte learnsets at 0x097DD63C, gWildMonHeaders 0x08A31664
+ * (all 14 literal-pool words; vanilla's shape, 151 headers), gMapGroups at FireRed's 0x083526A8
+ * (rewritten in place: 43 groups).
+ */
+val GUIDE_TABLES_GS_CHRONICLES = GuideTables(
+    trainers = 0x0823EAC8L,
+    learnsets = 0x097DD63CL,
+    learnsetCfru = true,
+    wildHeaders = 0x08A31664L,
+    probeTrainer = 321,
+    probeName = "Falkner",
+    guide = GuideId.GS_CHRONICLES,
+    mapGroups = 0x083526A8L,
 )
 
 /**
@@ -867,6 +983,42 @@ val GUIDE_TABLES_RECHARGED_YELLOW_V1_9_4 = GUIDE_TABLES_RECHARGED_YELLOW.copy(
 )
 val GUIDE_TABLES_RECHARGED_YELLOW_V1_9_7 = GUIDE_TABLES_RECHARGED_YELLOW.copy(
     trainers = 0x08768748L, learnsets = 0x089721F0L, wildHeaders = 0x08A6BD84L, mapGroups = 0x08B3F134L,
+)
+
+/**
+ * Pokémon Recharged Emerald: Emerald's trainer ids (265 = Roxanne, every one of the 855 names at retail's id), map
+ * groups and SaveBlock1 flags / vars moved by its bigger bag (+0x1344 / +0x1470, its GF ROM header's; Rebalanced 4
+ * later), Recharged Yellow's struct Trainer (0x24 bytes, name +0x13 in its mixed case, sizes +0x1F, a HARD party
+ * +0x20) and TrainerMons. gLevelUpLearnsets by BULBASAUR's list, gWildMonHeaders by retail's first map ids (v2.2.x
+ * keep retail's 20-byte header; Rebalanced's is 0x24 bytes - land, a second land table, water, rock smash, fishing
+ * at slots 0, 1, 2, 4, 6 - followed from v2.2.8's through the code that loads it), gMapGroups by the current map's
+ * header (gMapHeader's bytes in the ROM -> its group's table -> the table of groups).
+ */
+private val GUIDE_TABLES_RECHARGED_EMERALD = GUIDE_TABLES_EMERALD.copy(
+    trainers = 0, learnsets = 0, wildHeaders = 0, mapGroups = 0,
+    sb1FlagsOff = 0x1344,
+    sb1VarsOff = 0x1470,
+    probeName = "Roxanne",
+    guide = GuideId.RECHARGED_EMERALD,
+    trainerStride = 0x24,
+    trainerNameOff = 0x13,
+    trainerNameLen = 11,
+    trainerSizeOff = 0x1F,
+    trainerPartyOff = 4,
+    trainerMon = TrainerMonLayout(stride = 0x20, movesOff = 0x0C, speciesOff = 0x14, itemOff = 0x16, levelOff = 0x1A),
+    trainerHardPartyOff = 0x20,
+)
+
+val GUIDE_TABLES_RECHARGED_EMERALD_V2_2_5 = GUIDE_TABLES_RECHARGED_EMERALD.copy(
+    trainers = 0x0870A924L, learnsets = 0x088D8D94L, wildHeaders = 0x08A3F59CL, mapGroups = 0x08B346B8L,
+)
+val GUIDE_TABLES_RECHARGED_EMERALD_V2_2_8 = GUIDE_TABLES_RECHARGED_EMERALD.copy(
+    trainers = 0x0870C7A4L, learnsets = 0x088DAC2CL, wildHeaders = 0x08A41234L, mapGroups = 0x08B36350L,
+)
+val GUIDE_TABLES_RECHARGED_EMERALD_REBALANCED_V2_2_8 = GUIDE_TABLES_RECHARGED_EMERALD.copy(
+    trainers = 0x0870CEB4L, learnsets = 0x088DB3B0L, wildHeaders = 0x08A42748L, mapGroups = 0x08B38104L,
+    sb1FlagsOff = 0x1348, sb1VarsOff = 0x1474,
+    wildLayout = WildLayout(stride = 0x24, land = 0, water = 2, rockSmash = 4, fishing = 6),
 )
 
 /**

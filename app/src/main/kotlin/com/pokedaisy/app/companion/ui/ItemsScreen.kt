@@ -77,12 +77,20 @@ import com.pokedaisy.app.companion.data.POCKET_TM_HM
 import com.pokedaisy.app.companion.data.activeGame
 import com.pokedaisy.app.companion.data.itemNamesEmeraldGame
 import com.pokedaisy.app.companion.data.itemNamesFireRedGame
-import com.pokedaisy.app.companion.data.itemNamesUltraVioletGame
-import com.pokedaisy.app.companion.data.ultraViolet
+import com.pokedaisy.app.companion.data.runningEmeraldHack
+import com.pokedaisy.app.companion.data.runningFireRedHack
 import com.pokedaisy.app.companion.data.localText
 import com.pokedaisy.app.companion.data.pocketLabel
 import com.pokedaisy.app.companion.data.pocketOrder
 import com.pokedaisy.app.companion.ui.theme.pixelFontFamily
+import com.pokedaisy.app.companion.data.isGameBoyGame
+import com.pokedaisy.app.companion.data.isCrystalFamily
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import com.pokedaisy.app.companion.ui.theme.gbaFocusRing
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 
 /**
  * DEFAULT keeps the bag's own slot order, as the game lists it, with the player's
@@ -99,8 +107,9 @@ private enum class ItemSort(val label: String) { DEFAULT(tk("Default")), NAME(tk
  */
 private fun gameItemNames(game: GameKind): Map<Int, String>? = when (game) {
     // A localized game's own (GameText), already in its casing.
-    GameKind.FIRERED -> localText?.items ?: if (ultraViolet) itemNamesUltraVioletGame else itemNamesFireRedGame
-    GameKind.EMERALD -> localText?.items ?: itemNamesEmeraldGame
+    GameKind.FIRERED -> localText?.items ?: runningFireRedHack?.itemsGame ?: itemNamesFireRedGame
+    // Recharged Emerald: its own whole table, in its mixed case.
+    GameKind.EMERALD -> localText?.items ?: runningEmeraldHack?.items ?: itemNamesEmeraldGame
     else -> null
 }
 
@@ -109,7 +118,8 @@ private fun gameItemNames(game: GameKind): Map<Int, String>? = when (game) {
 internal fun bagItemName(id: Int): String = gameItemNames(activeGame)?.get(id) ?: itemName(id)
 
 private fun capsBagLabels(game: GameKind): Boolean =
-    gameItemNames(game) != null || game == GameKind.HEART_AND_SOUL || game == GameKind.ORANGE_ISLANDS
+    gameItemNames(game) != null || game == GameKind.HEART_AND_SOUL || game == GameKind.ORANGE_ISLANDS ||
+        (game.isCrystalFamily && game != GameKind.PRISM)   // Prism's bag is mixed case ("Poké Ball")
 
 /** The FAVORITES tab's id among the pocket tabs (pocket ids are 0 and up): the starred items. */
 private const val FAVORITES_TAB = -1
@@ -329,6 +339,25 @@ private val SwordShieldBag = BagPalette(
 )
 
 /**
+ * Sampled from GS Chronicles' bag screen (headless): its rows are light blue-grey pills in a
+ * charcoal line with a grey inner edge, the vanilla grey text, the pocket title the same pill,
+ * the navy description box with white text, a light icon box with a slate edge, the orange
+ * pocket arrows (underline) and blue 2px stripes.
+ */
+private val GsChroniclesBag = BagPalette(
+    panelLayers = listOf(Color(0xFF292929) to 1, Color(0xFFB5B5B5) to 1, Color(0xFF292929) to 1, Color(0xFFC6CEDE) to 1),
+    tabLayerCount = 3,
+    fill = Color(0xFFC6CEDE), divider = Color(0xFF292929),
+    text = Color(0xFF636363), textShadow = Color(0xFFD6D6CE),
+    tabText = Color(0xFF636363), tabTextShadow = Color(0xFFD6D6CE), tabUnderline = Color(0xFFFF5200),
+    descLayers = listOf(Color(0xFF29394A) to 1), descFill = Color(0xFF001031),
+    descText = Color(0xFFFFFFFF), descTextShadow = Color(0xFF636363),
+    iconBox = Color(0xFFC6CEDE), iconBoxEdge = Color(0xFF29394A),
+    backdrop = Color(0xFF08397B) to Color(0xFF004AA5),
+    dividerDash = null, dividerWidth = 1, dividerShadow = Color(0xFFB5B5B5),
+)
+
+/**
  * Sampled from Odyssey's bag screen: light grey-cream rows split by solid
  * gold lines on a gold ground, the vanilla grey text, the dark pocket-title
  * box (the tabs: dark with white text, gold edge), the dark description bar,
@@ -446,6 +475,24 @@ private val YellowBag = BagPalette(
     backdrop = Color.White to Color.White,
 )
 
+/**
+ * Pokémon Crystal (Game Boy Color): its PACK, sampled headless - Yellow's black-on-white text boxes,
+ * the cursor's red under the pocket, and the PACK screen's blue checks (two blues) behind it.
+ */
+private val CrystalBag = YellowBag.copy(
+    tabUnderline = Color(0xFFFF0000),
+    backdrop = Color(0xFF7B7BFF) to Color(0xFF0000FF),
+)
+
+/**
+ * Pokémon Crystal Clear: the same text boxes in its PACK's red (the player picks the PACK's colour at the start; red is
+ * the default, sampled headless): the cursor, and the red checks of the PACK's side panel behind it.
+ */
+private val CrystalClearBag = YellowBag.copy(
+    tabUnderline = Color(0xFFFF0000),
+    backdrop = Color(0xFFFF0000) to Color(0xFFAD0000),
+)
+
 /** Whether [ItemsBackdrop] replaces the party backdrop behind this game's Items tab. */
 fun hasItemsBackdrop(game: GameKind): Boolean = bagPaletteFor(game).backdrop != null
 
@@ -493,7 +540,7 @@ fun ItemsBackdrop(game: GameKind, modifier: Modifier = Modifier) {
 /** Same grouping as the companion backdrop (rememberGameBackground). */
 private fun bagPaletteFor(game: GameKind): BagPalette =
     // Gen 1's white goes nearly black, like its party backdrop (GameBackdrop).
-    lightBagFor(game).let { if (OptionColors.dark) nightBags.getOrPut(it) { it.night(if (game == GameKind.YELLOW) 0.9f else OptionColors.backdropScrim) } else it }
+    lightBagFor(game).let { if (OptionColors.dark) nightBags.getOrPut(it) { it.night(if (game.isGameBoyGame) 0.9f else OptionColors.backdropScrim) } else it }
 
 private fun lightBagFor(game: GameKind): BagPalette = when (game) {
     GameKind.EMERALD -> EmeraldBag
@@ -503,11 +550,16 @@ private fun lightBagFor(game: GameKind): BagPalette = when (game) {
     GameKind.RADICAL_RED -> RadicalRedBag
     GameKind.ODYSSEY -> OdysseyBag
     GameKind.SWORD_SHIELD -> SwordShieldBag
+    GameKind.GS_CHRONICLES -> GsChroniclesBag
     GameKind.EMERALD_ROGUE -> RogueBag
     GameKind.LAZARUS, GameKind.EMERALD_SEAGLASS -> PlainExpansionBag
     GameKind.ROWE -> RoweBag
     GameKind.SOULGOLD -> SoulGoldBag
     GameKind.YELLOW -> YellowBag
+    GameKind.CRYSTAL -> CrystalBag
+    GameKind.CRYSTAL_CLEAR -> CrystalClearBag
+    // Prism's PACK: Crystal's blue checks and text boxes.
+    GameKind.PRISM -> CrystalBag
     GameKind.MARIOMON -> MariomonBag
     // Too Many Types 2's, Glazed's, Imperium's and Quetzal's bags are Emerald's; Gaia's and Celia's are FireRed's.
     GameKind.TMT2, GameKind.GLAZED, GameKind.IMPERIUM, GameKind.QUETZAL -> EmeraldBag
@@ -536,6 +588,9 @@ fun ItemsScreen(
     var sort by remember { mutableStateOf(ItemSort.DEFAULT) }
     var selectedItem by remember { mutableStateOf(items.firstOrNull { it.itemId == initialItemId }) }
     var selectedKey by remember { mutableStateOf(selectedItem?.let { "${it.itemId}#0" }) }
+    // A D-pad's A and a tap mean different things on the selected item (USE / GIVE vs closing it).
+    val inputModes = androidx.compose.ui.platform.LocalInputModeManager.current
+    val actionFocus = remember { FocusRequester() }
     val pal = bagPaletteFor(activeGame)
     val caps = gameItemNames(activeGame)
     val shown = items.map { item ->
@@ -699,9 +754,23 @@ fun ItemsScreen(
                             ItemRow(
                                 item, pal, m, selected = selectedItem != null && key == selectedKey, favorite = item.itemId in favorites,
                                 marked = itemUse?.marked(item.itemId) == true,
+                                // With none picked, the D-pad starts on the first item, like the game's bag cursor.
+                                start = selectedItem == null && i == 0,
+                                // The D-pad (the companion's window): the cursor picks the item as it moves, as in
+                                // the game's bag, its description showing. Only then: a mouse click focuses the row
+                                // too, and picking it here first made the click close it again.
+                                onFocus = {
+                                    if (inputModes.inputMode == androidx.compose.ui.input.InputMode.Keyboard) {
+                                        selectedItem = item
+                                        selectedKey = key
+                                    }
+                                },
                             ) {
                                 if (selectedItem != null && key == selectedKey) {
-                                    selectedItem = null
+                                    // A on the item the cursor's on goes to its USE / GIVE; a tap closes it again.
+                                    if (inputModes.inputMode == androidx.compose.ui.input.InputMode.Keyboard) {
+                                        runCatching { actionFocus.requestFocus() }
+                                    } else selectedItem = null
                                 } else {
                                     selectedItem = item
                                     selectedKey = key
@@ -717,29 +786,31 @@ fun ItemsScreen(
             if (selectedItem != null) Spacer(Modifier.height(descHeight + u * 2))
         }
 
-        // Folder tabs (the first flush with the window's top edge), with the
-        // sort control pinned apart at the bottom - scrolls only on a screen too
-        // short for all of them.
-        BoxWithConstraints(Modifier.width(tabWidth + panelFrame).fillMaxHeight()) {
-            Column(
-                verticalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .heightIn(min = maxHeight),
-            ) {
-                Column {
-                    tabs.forEachIndexed { i, pocket ->
-                        FolderTab(
-                            tabLabels[i], pal, m,
-                            selected = category == pocket,
-                            first = i == 0,
-                            tabWidth = tabWidth, panelFrame = panelFrame,
-                        ) {
-                            selectedCategory = pocket
-                            selectedItem = null
-                        }
-                        Spacer(Modifier.height(u * 2))
+        // Folder tabs: ALL (flush with the window's top edge) stays put, and so do the PC and sort buttons pinned at
+        // the bottom; on a screen too short for every tab (the Thor's, with 6+ pockets) only the tabs between them
+        // scroll.
+        Column(Modifier.width(tabWidth + panelFrame).fillMaxHeight()) {
+            val tab: @Composable (Int) -> Unit = { i ->
+                FolderTab(
+                    tabLabels[i], pal, m,
+                    selected = category == tabs[i],
+                    first = i == 0,
+                    tabWidth = tabWidth, panelFrame = panelFrame,
+                ) {
+                    selectedCategory = tabs[i]
+                    selectedItem = null
+                }
+                Spacer(Modifier.height(u * 2))
+            }
+            if (tabs.isNotEmpty()) tab(0)
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                for (i in 1 until tabs.size) tab(i)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(u * 4), modifier = Modifier.padding(top = u * 2)) {
+                // PC anywhere (GitHub #85): the game's own PC over the field; a "not now" pops up over the bag.
+                if (itemUse?.canPc() == true) {
+                    PcButton(pal, m, width = tabWidth - u * 4) {
+                        itemUse.openPc { o -> if (o.result != ItemUseResult.USED) notice = ItemNotice(0, itemUseMessage(o), ok = false) }
                     }
                 }
                 SortButton(sortLabel(sort), pal, m, width = tabWidth - u * 4) {
@@ -758,6 +829,7 @@ fun ItemsScreen(
                 onDismiss = { selectedItem = null },
                 favorite = item.itemId in favorites,
                 onFavorite = { FavoriteItems.toggle(item.itemId) },
+                actionFocus = actionFocus,
                 message = message,
                 // An item used or given away to the last leaves the bag: nothing left to tap.
                 onUse = itemUse?.takeIf { it.canUse(item.itemId) && items.any { i -> i.itemId == item.itemId } }?.let { use ->
@@ -796,6 +868,7 @@ private fun FolderTab(
     // window's outline, so the two borders meet in a clean corner - and it
     // carries the orange underline the game draws under its pocket title.
     val reach = if (selected) pal.selectedFillReach else 0
+    val focused by noRipple.collectIsFocusedAsState()
     Box(
         contentAlignment = Alignment.CenterStart,
         modifier = Modifier
@@ -831,6 +904,8 @@ private fun FolderTab(
                 }
             }
             .soundClickable(interactionSource = noRipple, indication = null, onClick = onClick)
+            // The D-pad's focus (the companion's window), inside the tab.
+            .gbaFocusRing(focused, PixelRoundedShape(u * 3))
             .padding(start = u * 10, end = u * (10 + reach), top = u * 6, bottom = u * 6),
     ) {
         // Tab-wide underline, drawn behind the label with its top half under
@@ -858,12 +933,14 @@ private fun FolderTab(
 private fun SortButton(label: String, pal: BagPalette, m: GbaTextMetrics, width: Dp, onClick: () -> Unit) {
     val u = m.u
     val noRipple = remember { MutableInteractionSource() }
+    val focused by noRipple.collectIsFocusedAsState()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
         modifier = Modifier
             .padding(start = u * 2)
             .width(width)
+            .gbaFocusRing(focused, PixelRoundedShape(u * 6))
             .drawBehind {
                 drawLayeredBox(pal.descLayers.inPx(u.toPx()), pal.descFill, radius = 6 * u.toPx())
             }
@@ -873,6 +950,30 @@ private fun SortButton(label: String, pal: BagPalette, m: GbaTextMetrics, width:
         SortIcon(pal, m)
         Spacer(Modifier.width(u * 4))
         GbaText(label, pal.descText, pal.descTextShadow, m)
+    }
+}
+
+/** PC: the game's own PC (WITHDRAW, DEPOSIT...) opened on the field, styled like [SortButton]. */
+@Composable
+private fun PcButton(pal: BagPalette, m: GbaTextMetrics, width: Dp, onClick: () -> Unit) {
+    val u = m.u
+    val noRipple = remember { MutableInteractionSource() }
+    val focused by noRipple.collectIsFocusedAsState()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .padding(start = u * 2)
+            .width(width)
+            .gbaFocusRing(focused, PixelRoundedShape(u * 6))
+            .drawBehind { drawLayeredBox(pal.descLayers.inPx(u.toPx()), pal.descFill, radius = 6 * u.toPx()) }
+            .soundClickable(interactionSource = noRipple, indication = null, onClick = onClick)
+            .padding(horizontal = u * 6, vertical = u * 6),
+    ) {
+        GbaText(tr("PC"), pal.descText, pal.descTextShadow, m)
+        // It opens the game's own PC, not a companion page (the HUD's PC has the same mark).
+        Spacer(Modifier.width(u * 3))
+        ShadowedPixelIcon(PixelIcons.inGame, pal.descText, pal.descTextShadow, m, cell = m.fontPixel.let { with(LocalDensity.current) { it.toDp() } })
     }
 }
 
@@ -905,13 +1006,21 @@ private fun ItemRow(
     item: ItemView, pal: BagPalette, m: GbaTextMetrics, selected: Boolean, favorite: Boolean,
     /** The companion can USE / GIVE it here: the Poké Ball mark, in the list's own text colours. */
     marked: Boolean = false,
+    /** The row took the D-pad's focus: the list's cursor goes to it ([selected] draws the bag's own cursor). */
+    onFocus: () -> Unit = {},
+    /** Where the D-pad starts with no item picked (the list's first). */
+    start: Boolean = false,
     onClick: () -> Unit,
 ) {
     val u = m.u
     val noRipple = remember { MutableInteractionSource() }
+    val focused by noRipple.collectIsFocusedAsState()
+    val currentOnFocus by rememberUpdatedState(onFocus)
+    LaunchedEffect(focused) { if (focused) currentOnFocus() }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .focusStart(selected || start)
             .fillMaxWidth()
             .height(m.rowHeight)
             .drawBehind {
@@ -995,15 +1104,20 @@ private fun ItemDescriptionBar(
     onUse: (() -> Unit)? = null,
     onGive: (() -> Unit)? = null,
     extra: (@Composable (item: ItemView, text: Color, shadow: Color) -> Unit)? = null,
+    /** Where A on the list's selected item sends the D-pad: USE, else GIVE, else the star. */
+    actionFocus: FocusRequester? = null,
 ) {
     val u = m.u
     val noRipple = remember { MutableInteractionSource() }
+    fun Modifier.action(first: Boolean) = if (first && actionFocus != null) focusRequester(actionFocus) else this
     Column(
         modifier
             .fillMaxWidth()
             .drawBehind {
                 drawLayeredBox(pal.descLayers.inPx(u.toPx()), pal.descFill, radius = 4 * u.toPx())
             }
+            // A tap anywhere closes it; not a D-pad stop (B does that, and its buttons are).
+            .focusProperties { canFocus = false }
             .soundClickable(interactionSource = noRipple, indication = null, onClick = onDismiss)
             .padding(start = u * 7, end = u * 7, top = u * 7, bottom = u * 7),
     ) {
@@ -1047,14 +1161,14 @@ private fun ItemDescriptionBar(
                         onClick = onFavorite,
                         pixelIcon = PixelIcons.star,
                         pixelIconColor = if (favorite) OptionColors.favorite else OptionColors.muted,
-                        modifier = Modifier.semantics { contentDescription = label },
+                        modifier = Modifier.action(onUse == null && onGive == null).semantics { contentDescription = label },
                     )
                 }
                 if (onUse != null || onGive != null) {
                     Spacer(Modifier.weight(1f))
                     Row(horizontalArrangement = Arrangement.spacedBy(u * 6)) {
-                        if (onUse != null) OptionButton("USE", m, onClick = onUse)
-                        if (onGive != null) OptionButton("GIVE", m, onClick = onGive)
+                        if (onUse != null) OptionButton("USE", m, onClick = onUse, modifier = Modifier.action(true))
+                        if (onGive != null) OptionButton("GIVE", m, onClick = onGive, modifier = Modifier.action(onUse == null))
                     }
                 }
             }
@@ -1066,7 +1180,7 @@ private fun ItemDescriptionBar(
 
 /** What a USE / GIVE did, in the companion's words: [mon] the Pokémon it went to, [item] the item, [held]
  * what the Pokémon held before. */
-private fun itemUseMessage(o: ItemUseOutcome, mon: String = "", item: String = "", held: Int = 0): String = when (o.result) {
+internal fun itemUseMessage(o: ItemUseOutcome, mon: String = "", item: String = "", held: Int = 0): String = when (o.result) {
     ItemUseResult.USED -> if (o.steps > 0) tr("Used! It lasts {0} steps.", o.steps) else tr("Used on {0}.", mon)
     ItemUseResult.STILL_ACTIVE -> tr("The last one is still working.")
     ItemUseResult.NOT_NOW -> tr("Not now: close the game's menus and battles first.")
@@ -1082,7 +1196,7 @@ private fun itemUseMessage(o: ItemUseOutcome, mon: String = "", item: String = "
 }
 
 /** What a USE / GIVE did, popped up over the bag ([ItemNoticeWindow]). */
-data class ItemNotice(val itemId: Int, val text: String)
+data class ItemNotice(val itemId: Int, val text: String, val ok: Boolean = true)
 
 private const val ITEM_NOTICE_MILLIS = 2600L
 
@@ -1104,12 +1218,14 @@ private fun ItemNoticeWindow(n: ItemNotice, m: GbaTextMetrics, modifier: Modifie
         modifier = modifier
             .widthIn(max = 560.dp)
             .drawBehind { drawLayeredBox(OptionColors.titleLayers.inPx(u.toPx()), OptionColors.titleFill, radius = 3 * u.toPx()) }
+            .focusProperties { canFocus = false }
             .soundClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
             .padding(horizontal = u * 10, vertical = u * 6),
     ) {
         val cell = with(LocalDensity.current) { m.fontPixel.toDp() }
-        ShadowedPixelIcon(PixelIcons.check, OptionColors.success, OptionColors.titleShadow, m, cell = cell)
-        ItemIcon(com.pokedaisy.app.companion.data.spriteAsset("items", n.itemId), size = m.lineHeight)
+        // A "not now" (PC) has neither the tick nor an item.
+        if (n.ok) ShadowedPixelIcon(PixelIcons.check, OptionColors.success, OptionColors.titleShadow, m, cell = cell)
+        if (n.itemId != 0) ItemIcon(com.pokedaisy.app.companion.data.spriteAsset("items", n.itemId), size = m.lineHeight)
         GbaText(n.text, OptionColors.titleText, OptionColors.titleShadow, m, maxLines = 3)
     }
 }

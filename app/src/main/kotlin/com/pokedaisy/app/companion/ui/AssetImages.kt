@@ -94,7 +94,7 @@ private suspend fun loadMonIconSheet(context: Context, asset: String?): Bitmap? 
 }
 
 /** The icon sheet if [DecompIconSource] / [UnboundIconSource] already has it decoded. */
-private fun peekMonIcon(asset: String?): Bitmap? {
+internal fun peekMonIcon(asset: String?): Bitmap? {
     if (asset == null) return null
     GameArt.peek(asset)?.let { return it }   // rom-art sheets (a Game Boy game's own icons)
     val id = asset.substringAfterLast('/').substringBefore('.').toIntOrNull() ?: return null
@@ -137,7 +137,11 @@ fun SpeciesIcon(asset: String?, size: Dp, modifier: Modifier = Modifier) {
 @Composable
 fun ItemIcon(asset: String?, size: Dp, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var bitmap by remember(asset) { mutableStateOf<Bitmap?>(null) }
+    // Starts from an already-decoded icon, like SpeciesIcon.
+    var bitmap by remember(asset) {
+        val id = asset?.takeUnless { it.startsWith("items-unbound/") }?.substringAfterLast('/')?.substringBefore('.')?.toIntOrNull()
+        mutableStateOf(id?.let { DecompIconSource.peekItem(it) })
+    }
     val gen = rememberIconGeneration()
     LaunchedEffect(asset, gen) {
         val id = asset?.substringAfterLast('/')?.substringBefore('.')?.toIntOrNull()

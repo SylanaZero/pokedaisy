@@ -94,6 +94,7 @@ import com.pokedaisy.app.companion.ui.GbaTextMetrics
 import com.pokedaisy.app.companion.ui.OptionButton
 import com.pokedaisy.app.companion.ui.OptionColors
 import com.pokedaisy.app.companion.ui.OptionConfirm
+import com.pokedaisy.app.companion.ui.KeyBindRow
 import com.pokedaisy.app.companion.ui.OptionLine
 import com.pokedaisy.app.companion.ui.OptionListWindow
 import com.pokedaisy.app.companion.ui.OptionRows
@@ -125,17 +126,15 @@ import com.pokedaisy.app.companion.ui.drawPixelRoundRect
  */
 class SettingsActivity : ComponentActivity() {
 
-    private enum class Screen { HOME, HOTKEYS, CONTROLS, SHADERS, OVERLAYS, FOLDERS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP }
+    private enum class Screen { HOME, SPEED, DISPLAY, HOTKEYS, CONTROLS, SHADERS, FIELD_HUD, QUICK_MENU, OVERLAYS, FOLDERS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP }
 
     private lateinit var prefs: Prefs
     private var screen by mutableStateOf(Screen.HOME)
     private var deletingFile by mutableStateOf<File?>(null)
     private var folderTick by mutableIntStateOf(0)
 
-    private var capturing by mutableStateOf<Hotkeys.Action?>(null)
-    private var capturingCtrl by mutableStateOf<GbaControls.Btn?>(null)
-    private var captured by mutableStateOf<List<Int>>(emptyList())
-    private val stillHeld = LinkedHashSet<Int>()
+    /** HOTKEYS / GAME BUTTONS: a row waiting for the keys to bind (KeyCapture takes every key meanwhile). */
+    private val capture = com.pokedaisy.app.companion.KeyCapture()
     /** A captured chord that other hotkeys already have exactly ([taken]): MOVE takes it off them. */
     private class HotkeyClash(val action: Hotkeys.Action, val keys: List<Int>, val taken: List<Hotkeys.Action>)
     private var hotkeyClash by mutableStateOf<HotkeyClash?>(null)
@@ -156,7 +155,8 @@ class SettingsActivity : ComponentActivity() {
     private var backTaken = false
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if ((event.keyCode == KeyEvent.KEYCODE_BUTTON_B || event.keyCode == KeyEvent.KEYCODE_BACK) && capturing == null && capturingCtrl == null) {
+        if (capture.onKey(event)) return true
+        if (event.keyCode == KeyEvent.KEYCODE_BUTTON_B || event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 if (event.repeatCount == 0) backTaken = overlays.dismissTop()
                 if (backTaken) return true
@@ -167,7 +167,7 @@ class SettingsActivity : ComponentActivity() {
         }
         val dpad = event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
             event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
-        if (dpad && event.action == KeyEvent.ACTION_DOWN && screen == Screen.HOME && !homeHasFocus && !overlays.isOpen && capturing == null && capturingCtrl == null) {
+        if (dpad && event.action == KeyEvent.ACTION_DOWN && screen == Screen.HOME && !homeHasFocus && !overlays.isOpen) {
             val first = homeFirstRow
             if (first != null && runCatching { first.requestFocus() }.isSuccess) return true
         }
@@ -185,6 +185,9 @@ class SettingsActivity : ComponentActivity() {
     /** SWAP SCREENS only means something with two. */
     private val hasSecondScreen by lazy { Screens.hasSecond(this) }
 
+    /** The companion goes on the second screen: there is one, and SINGLE SCREEN is off. */
+    private val usesSecondScreen get() = hasSecondScreen && !prefs.singleScreen
+
     private val updates by lazy { AppUpdateFlow(this) }
 
     /** HELP: the manual (DocsScreen.kt), its place kept while Settings is open. */
@@ -197,7 +200,6 @@ class SettingsActivity : ComponentActivity() {
     private var cheatsOnly = false
     /** HOME's search box; kept while a sub-page it led to is open. */
     private var searchQuery by mutableStateOf("")
-    private var controlsOnly = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -210,19 +212,14 @@ class SettingsActivity : ComponentActivity() {
             cheatRom = File(path)
             screen = Screen.CHEATS
         }
-        // First-time setup's GAME BUTTONS step: the rebind page alone, BACK returns to setup.
-        if (intent?.getStringExtra(EXTRA_SCREEN) == SCREEN_CONTROLS) {
-            controlsOnly = true
-            screen = Screen.CONTROLS
-        }
         if (intent?.getStringExtra(EXTRA_SCREEN) == SCREEN_HELP) {
             helpOnly = true
             screen = Screen.HELP
         }
         setContent {
-            AppTheme {
+            AppTheme { com.pokedaisy.app.companion.ui.CompactTextOnSmallWindows {
                 androidx.compose.runtime.CompositionLocalProvider(com.pokedaisy.app.companion.ui.LocalOverlayStack provides overlays) { Root() }
-            }
+            } }
         }
     }
 
@@ -232,71 +229,27 @@ class SettingsActivity : ComponentActivity() {
         updates.onResume()
     }
 
-    // ---- physical-key capture (Hotkeys / Game buttons screens) ----------------
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (capturing == null && capturingCtrl == null) return super.onKeyDown(keyCode, event)
-        if (keyCode == KeyEvent.KEYCODE_BACK) { cancelCapture(); return true }
-        captureDown(keyCode)
-        return true
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (capturing == null && capturingCtrl == null) return super.onKeyUp(keyCode, event)
-        captureUp(keyCode)
-        return true
+    override fun onPause() {
+        super.onPause()
+        capture.cancel()
     }
 
     // Analog L2 / R2 (Retroid's triggers send no keys): captured as BUTTON_L2 / R2, the keys the game
     // screen turns them into.
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if ((capturing == null && capturingCtrl == null) || !event.isFromSource(InputDevice.SOURCE_JOYSTICK)) {
-            return super.dispatchGenericMotionEvent(event)
-        }
-        captureTrigger(KeyEvent.KEYCODE_BUTTON_L2, maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE)))
-        captureTrigger(KeyEvent.KEYCODE_BUTTON_R2, maxOf(
-            event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS),
-            event.getAxisValue(MotionEvent.AXIS_THROTTLE),
-        ))
-        return true
-    }
-
-    private fun captureTrigger(keyCode: Int, value: Float) {
-        val down = value > 0.5f
-        if (down == (keyCode in stillHeld)) return
-        if (down) captureDown(keyCode) else captureUp(keyCode)
-    }
-
-    private fun captureDown(keyCode: Int) {
-        if (keyCode !in captured) captured = captured + keyCode
-        stillHeld.add(keyCode)
-    }
-
-    private fun captureUp(keyCode: Int) {
-        if (capturing == null && capturingCtrl == null) return
-        stillHeld.remove(keyCode)
-        if (stillHeld.isEmpty() && captured.isNotEmpty()) {
-            capturing?.let { action ->
-                // The same chord on another hotkey: asked first, never two actions on one chord.
-                val taken = Hotkeys.clashes(Hotkeys.load(filesRoot).rawBindings, action, captured.map { Hotkeys.keyName(it) })
-                if (taken.isEmpty()) Hotkeys.setBinding(filesRoot, action, captured)
-                else hotkeyClash = HotkeyClash(action, captured, taken)
-            }
-            capturingCtrl?.let { GbaControls.setBinding(filesRoot, it, captured.first()) }
-            revision++
-            cancelCapture()
-        }
-    }
-
-    private fun cancelCapture() {
-        capturing = null; capturingCtrl = null; captured = emptyList(); stillHeld.clear()
+        if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) && capture.onTriggers(
+                maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE)),
+                maxOf(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS), event.getAxisValue(MotionEvent.AXIS_THROTTLE)),
+            )
+        ) return true
+        return super.dispatchGenericMotionEvent(event)
     }
 
     // ---- shell --------------------------------------------------------------
 
     @Composable
     private fun Root() {
-        BackHandler(enabled = screen != Screen.HOME) { cancelCapture(); goBack() }
+        BackHandler(enabled = screen != Screen.HOME) { capture.cancel(); goBack() }
         BackHandler(enabled = aspectPicker) { aspectPicker = false }
         BackHandler(enabled = hotkeyClash != null) { hotkeyClash = null }
         val m = rememberGbaTextMetrics()
@@ -310,9 +263,13 @@ class SettingsActivity : ComponentActivity() {
                 OptionTitleWindow(
                     title = when (screen) {
                         Screen.HOME -> tk("SETTINGS")
+                        Screen.SPEED -> tk("SPEED OPTIONS")
+                        Screen.DISPLAY -> tk("DISPLAY OPTIONS")
                         Screen.HOTKEYS -> tk("HOTKEYS")
                         Screen.CONTROLS -> tk("GAME BUTTONS")
                         Screen.SHADERS -> tk("SHADERS")
+                        Screen.FIELD_HUD -> tk("HUD")
+                        Screen.QUICK_MENU -> tk("QUICK MENU")
                         Screen.OVERLAYS -> tk("OVERLAY")
                         Screen.FOLDERS -> tk("FOLDERS")
                         Screen.COVER_ART -> tk("COVER ART")
@@ -326,16 +283,20 @@ class SettingsActivity : ComponentActivity() {
                     },
                     m = m,
                     onBack = {
-                        cancelCapture()
+                        capture.cancel()
                         goBack()
                     },
                 )
                 Spacer(Modifier.height(m.u * 4))
                 when (screen) {
                     Screen.HOME -> HomeScreen(m)
+                    Screen.SPEED -> SubRowsScreen(m) { speedRows() }
+                    Screen.DISPLAY -> SubRowsScreen(m) { displayRows() }
                     Screen.HOTKEYS -> HotkeysScreen(m, small)
                     Screen.CONTROLS -> ControlsScreen(m, small)
                     Screen.SHADERS -> ShadersScreen(m)
+                    Screen.FIELD_HUD -> FieldHudScreen(m)
+                    Screen.QUICK_MENU -> QuickMenuScreen(m)
                     Screen.OVERLAYS -> OverlaysScreen(m, small)
                     Screen.FOLDERS -> FoldersScreen(m, small)
                     Screen.COVER_ART -> CoverArtScreen(m, small)
@@ -387,7 +348,7 @@ class SettingsActivity : ComponentActivity() {
                     title = tk("KEY IN USE"),
                     message = tr(
                         "{0} is already {1}. Move it to {2}?",
-                        c.keys.joinToString(" + ") { keyLabel(Hotkeys.keyName(it)) },
+                        com.pokedaisy.app.companion.KeyCapture.chordLabel(c.keys),
                         c.taken.joinToString(", ") { tr(it.title) }, tr(c.action.title),
                     ),
                     confirmLabel = tk("MOVE"),
@@ -491,7 +452,9 @@ class SettingsActivity : ComponentActivity() {
             screen == Screen.CHEAT_ADD -> screen = Screen.CHEATS
             screen == Screen.HELP && docsUi.back() -> {}
             screen == Screen.HELP && helpOnly -> finish()
-            screen == Screen.HOME || (screen == Screen.CHEATS && cheatsOnly) || (screen == Screen.CONTROLS && controlsOnly) -> finish()
+            screen == Screen.HOME || (screen == Screen.CHEATS && cheatsOnly) -> finish()
+            // SHADERS and OVERLAY open from DISPLAY OPTIONS.
+            screen == Screen.SHADERS || screen == Screen.OVERLAYS -> { overlayRemoveMode = false; screen = Screen.DISPLAY }
             else -> { cheatRemoveMode = false; overlayRemoveMode = false; screen = Screen.HOME }
         }
     }
@@ -516,6 +479,56 @@ class SettingsActivity : ComponentActivity() {
 
     // ---- hub --------------------------------------------------------------
 
+    /** A sub-page that's only rows (SPEED OPTIONS, DISPLAY OPTIONS), drawn like the hub's. */
+    @Composable
+    private fun SubRowsScreen(m: GbaTextMetrics, rows: () -> List<SettingRow>) {
+        @Suppress("UNUSED_EXPRESSION") revision
+        val list = rows()
+        Column(Modifier.fillMaxWidth()) {
+            OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                GroupedRows(list, m, cursor = -1, onClick = { list[it].onClick() })
+            }
+        }
+    }
+
+    /** SPEED OPTIONS: how fast-forward behaves and sounds (SCENE SPEEDS is the companion's: it needs the game). */
+    private fun speedRows(): List<SettingRow> = listOf(
+            // SMART: menus and the region map at 1x; NORMAL: fast everywhere.
+            SettingRow(tk("FF MODE"), prefs.ffMode.label, subtitle = "SMART slows down for menus and the map") {
+                val modes = FfMode.entries
+                selector = Selector(tk("FF MODE"), modes.map { it.label }, prefs.ffMode.label) { l -> prefs.ffMode = modes.first { it.label == l } }
+            },
+            // STEADY / SPED-UP / OFF (FfMusicMode's order).
+            SettingRow(tk("FF MUSIC"), prefs.ffMusicMode.label, subtitle = "What you hear while fast-forwarding") {
+                val modes = FfMusicMode.entries
+                selector = Selector(tk("FF MUSIC"), modes.map { it.label }, prefs.ffMusicMode.label) { l -> prefs.ffMusicMode = modes.first { it.label == l } }
+            },
+    )
+
+    /** DISPLAY OPTIONS: what's around the game (the status bar, the shaders, an overlay) and an upright phone's companion. */
+    private fun displayRows(): List<SettingRow> {
+        fun onOff(on: Boolean) = if (on) tk("ON") else tk("OFF")
+        return listOfNotNull(
+            // Game, location, money, clock and battery: OFF, over the game, or over the companion's tabs.
+            SettingRow(tk("STATUS BAR"), statusBarLabel(prefs.statusBar, prefs.statusBarOnCompanion), subtitle = "Place, money, clock and battery") {
+                selector = Selector(tk("STATUS BAR"), STATUS_BAR_PLACES, statusBarLabel(prefs.statusBar, prefs.statusBarOnCompanion)) {
+                    val i = STATUS_BAR_PLACES.indexOf(it)
+                    if (i > 0) prefs.statusBarOnCompanion = i == 2
+                    prefs.statusBar = i > 0
+                }
+            },
+            // FILTER (LCD / LCD PAPER / SCANLINES / CRT) and GBA COLORS, on their own page.
+            SettingRow(tk("SHADERS"), prefs.screenFilter.label, opensPage = true, subtitle = "LCD, CRT and scanline looks, smoothing") { screen = Screen.SHADERS },
+            // A frame around the game: the built-in ones and imported RetroArch overlays, on their own page.
+            SettingRow(tk("OVERLAY"), overlayLabel(overlayChoices(overlayStore), prefs.overlay), opensPage = true, subtitle = "A frame around the game") { screen = Screen.OVERLAYS },
+            // One screen held upright: the companion along the bottom, or right under the game (the touch pad below it).
+            SettingRow(tk("COMPANION"), portraitPlaceLabel(prefs.portraitCompanionUnderGame), subtitle = "Where it sits with the phone upright") {
+                prefs.portraitCompanionUnderGame = !prefs.portraitCompanionUnderGame
+                revision++
+            }.takeIf { !usesSecondScreen },
+        )
+    }
+
     /** Like the companion's SETTINGS tab: `LABEL  VALUE` rows; on/off rows
      * flip on tap, multi-choice rows open a pick-one list, the rest open
      * their own page. */
@@ -530,69 +543,66 @@ class SettingsActivity : ComponentActivity() {
         fun onOff(on: Boolean) = if (on) tk("ON") else tk("OFF")
         // The same groups and order as the bottom screen's SETTINGS where they overlap.
         val rows = listOfNotNull(
-            groupTitle(tk("FAST-FORWARD")),
-            SettingRow(tk("FF SPEED"), rateLabel(prefs.ffMaxSpeed)) {
+            groupTitle(tk("FF / SPEED")),
+            SettingRow(tk("FF SPEED"), rateLabel(prefs.ffMaxSpeed), subtitle = "How fast FF runs") {
                 selector = Selector(tk("FF SPEED"), rateLabels, rateLabel(prefs.ffMaxSpeed)) {
                     prefs.ffMaxSpeed = RATES[rateLabels.indexOf(it)]
                 }
             },
-            // SMART: menus and the region map at 1x; NORMAL: fast everywhere.
-            SettingRow(tk("FF MODE"), prefs.ffMode.label) {
-                val modes = FfMode.entries
-                selector = Selector(tk("FF MODE"), modes.map { it.label }, prefs.ffMode.label) { l -> prefs.ffMode = modes.first { it.label == l } }
-            },
-            // STEADY / SPED-UP / OFF (FfMusicMode's order).
-            SettingRow(tk("FF MUSIC"), prefs.ffMusicMode.label) {
-                val modes = FfMusicMode.entries
-                selector = Selector(tk("FF MUSIC"), modes.map { it.label }, prefs.ffMusicMode.label) { l -> prefs.ffMusicMode = modes.first { it.label == l } }
-            },
             // Keeps the last ~20 s; the REWIND HOLD hotkey plays them backwards.
-            SettingRow(tk("REWIND"), if (prefs.rewind) tk("ON") else tk("OFF")) { prefs.rewind = !prefs.rewind; revision++ },
-            groupTitle(tk("CONTROLS")),
-            // Takes effect the next time a game is opened.
-            SettingRow(tk("TOUCH PAD"), TOUCH_NAMES[prefs.touchControlsMode]) {
-                selector = Selector(tk("TOUCH PAD"), TOUCH_NAMES, TOUCH_NAMES[prefs.touchControlsMode]) {
-                    prefs.touchControlsMode = TOUCH_NAMES.indexOf(it)
-                }
-            },
-            SettingRow(tk("GAME BUTTONS"), null, subtitle = "Key bindings: which button presses A, B, START...") { screen = Screen.CONTROLS },
-            SettingRow(tk("HOTKEYS"), onOff(prefs.hotkeysEnabled)) { screen = Screen.HOTKEYS },
+            SettingRow(tk("REWIND"), if (prefs.rewind) tk("ON") else tk("OFF"), subtitle = "Keeps the last 20 s to play backwards") { prefs.rewind = !prefs.rewind; revision++ },
+            // FF MODE and FF MUSIC: set once and rarely touched, on their own page (the companion's has SCENE SPEEDS too).
+            SettingRow(tk("SPEED OPTIONS"), null, subtitle = "FF mode and FF music", opensPage = true) { screen = Screen.SPEED },
             groupTitle(tk("SCREEN")),
-            // Game, location, money, clock and battery: OFF, over the game, or over the companion's tabs.
-            SettingRow(tk("STATUS BAR"), statusBarLabel(prefs.statusBar, prefs.statusBarOnCompanion)) {
-                selector = Selector(tk("STATUS BAR"), STATUS_BAR_PLACES, statusBarLabel(prefs.statusBar, prefs.statusBarOnCompanion)) {
-                    val i = STATUS_BAR_PLACES.indexOf(it)
-                    if (i > 0) prefs.statusBarOnCompanion = i == 2
-                    prefs.statusBar = i > 0
-                }
-            },
             // The game at 3:2, stretched to fill the screen, or WIDE (more of the map, BETA); picked by preview.
             SettingRow(tk("ASPECT"), aspectLabel(prefs.gameAspect),
-                       badge = tk("BETA").takeIf { prefs.gameAspect == com.pokedaisy.app.companion.GameAspect.WIDE }) { aspectPicker = true },
+                       badge = tk("BETA").takeIf { prefs.gameAspect == com.pokedaisy.app.companion.GameAspect.WIDE }, subtitle = "Original shape, stretched, or more of the map") { aspectPicker = true },
             // EXPAND only: whether a conversation, sign, menu or picture over the field pulls the zoom in (battles always do).
             SettingRow(tk("AUTO ZOOM IN"), onOff(prefs.expandZoomOnText),
                        subtitle = "1x on dialogue, signs, menus") {
                 prefs.expandZoomOnText = !prefs.expandZoomOnText
                 revision++
             }.takeIf { prefs.gameAspect == com.pokedaisy.app.companion.GameAspect.WIDE },
-            // FILTER (LCD / LCD PAPER / SCANLINES / CRT) and GBA COLORS, on their own page.
-            SettingRow(tk("SHADERS"), prefs.screenFilter.label) { screen = Screen.SHADERS },
-            // A frame around the game: the built-in ones and imported RetroArch overlays, on their own page.
-            SettingRow(tk("OVERLAY"), overlayLabel(overlayChoices(overlayStore), prefs.overlay)) { screen = Screen.OVERLAYS },
-            // One screen held upright: the companion along the bottom, or right under the game (the touch pad below it).
-            SettingRow(tk("COMPANION"), portraitPlaceLabel(prefs.portraitCompanionUnderGame)) {
-                prefs.portraitCompanionUnderGame = !prefs.portraitCompanionUnderGame
+            // The party, a minimap, the balls and BAG / WILD over the game on the field: its own page (layout, look, size, parts).
+            SettingRow(tk("HUD"), onOff(prefs.fieldHud), labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.HUD), opensPage = true, subtitle = "Party, minimap and bag over the game") { screen = Screen.FIELD_HUD },
+            // One screen: FIGHT, POKéMON and RUN in the room beside a battle (BattleButtons).
+            SettingRow(
+                tk("BATTLE BUTTONS"), onOff(prefs.battleButtons), subtitle = "FIGHT, POKéMON and RUN beside a battle",
+                labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.BATTLE_BUTTONS),
+            ) {
+                prefs.battleButtons = !prefs.battleButtons
                 revision++
-            }.takeIf { !hasSecondScreen },
+            }.takeIf { !usesSecondScreen },
+            // STATUS BAR, SHADERS, OVERLAY (and an upright phone's COMPANION): on their own page.
+            SettingRow(tk("DISPLAY OPTIONS"), null, subtitle = "Status bar, shaders, overlay", opensPage = true) { screen = Screen.DISPLAY },
+            // One screen sideways: the companion as a window in the middle over the game, or the side panel.
+            SettingRow(
+                tk("COMPANION VIEW"), com.pokedaisy.app.companion.ui.companionViewLabel(prefs.companionWindow),
+                labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.COMPANION_WINDOW), subtitle = "A window over the game, or a side panel",
+            ) {
+                prefs.companionWindow = !prefs.companionWindow
+                revision++
+            }.takeIf { !usesSecondScreen },
             // Game and companion trade screens; the game picks it up on resume.
-            SettingRow(tk("SWAP SCREENS"), onOff(prefs.swapScreens)) {
+            SettingRow(tk("SWAP SCREENS"), onOff(prefs.swapScreens), subtitle = "Game and companion trade screens") {
                 prefs.swapScreens = !prefs.swapScreens
                 revision++
-            }.takeIf { hasSecondScreen },
-            // The game's frames per second and the app's CPU share, in the game's corner.
-            SettingRow(tk("FPS / CPU"), onOff(prefs.showPerformance)) {
-                prefs.showPerformance = !prefs.showPerformance
+            }.takeIf { usesSecondScreen },
+            // Two screens played on one: the second is free for other apps, the companion opens over the game.
+            SettingRow(
+                tk("SINGLE SCREEN"), onOff(prefs.singleScreen), subtitle = "Second screen free; companion over the game",
+                labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.SINGLE_SCREEN),
+            ) {
+                prefs.singleScreen = !prefs.singleScreen
                 revision++
+            }.takeIf { hasSecondScreen },
+            // Changes the colors immediately, everywhere — the companion screen too.
+            SettingRow(tk("THEME"), themeLabels[themeIdx], subtitle = "The backdrop of the library and Settings") {
+                selector = Selector(tk("THEME"), themeLabels, themeLabels[themeIdx]) {
+                    val spec = APP_THEMES[themeLabels.indexOf(it)]
+                    prefs.appTheme = spec.id
+                    AppColors.applyTheme(spec)
+                }
             },
             // OFF / ON / AUTO (the device's): both screens switch at once.
             SettingRow(tk("DARK MODE"), DarkMode.setting.label) {
@@ -601,44 +611,60 @@ class SettingsActivity : ComponentActivity() {
                     DarkMode.set(this@SettingsActivity, modes.first { it.label == l })
                 }
             },
-            // Changes the colors immediately, everywhere — the companion screen too.
-            SettingRow(tk("THEME"), themeLabels[themeIdx]) {
-                selector = Selector(tk("THEME"), themeLabels, themeLabels[themeIdx]) {
-                    val spec = APP_THEMES[themeLabels.indexOf(it)]
-                    prefs.appTheme = spec.id
-                    AppColors.applyTheme(spec)
-                }
+            // The game's frames per second and the app's CPU share, in the game's corner.
+            SettingRow(tk("FPS / CPU"), onOff(prefs.showPerformance), subtitle = "Speed and CPU use in the game's corner") {
+                prefs.showPerformance = !prefs.showPerformance
+                revision++
             },
             groupTitle(tk("LIBRARY")),
             // On: a game opens where it was left. Off: at its title screen, from the save.
-            SettingRow(tk("RESUME GAMES"), onOff(prefs.autoResume)) {
+            SettingRow(tk("RESUME GAMES"), onOff(prefs.autoResume), subtitle = "Open a game right where you left it") {
                 prefs.autoResume = !prefs.autoResume
                 revision++
             },
-            SettingRow(tk("FOLDERS"), null) { screen = Screen.FOLDERS },
-            // Every game's media (box art, screenshots, logos, videos, facts): first for covers, and the launcher's other screen.
-            SettingRow("ScreenScraper", prefs.screenScraperAccount?.user?.uppercase() ?: tk("OFF")) {
-                ssLogin.refresh(prefs) { r -> runOnUiThread { r() } }
-                screen = Screen.SCREENSCRAPER
-            }.takeIf { ScreenScraperClient.enabled },
-            SettingRow(tk("COVER ART"), onOff(prefs.steamGridDbApiKey != null || prefs.raWebApiKey != null)) { screen = Screen.COVER_ART },
             // Two screens: the game list on one, the game you're on (its media) on the other. X swaps them.
-            SettingRow(tk("DUAL-SCREEN LAUNCHER"), onOff(prefs.dualScreenLauncher)) {
+            SettingRow(tk("DUAL-SCREEN LAUNCHER"), onOff(prefs.dualScreenLauncher), subtitle = "Game list on one screen, its art on the other") {
                 prefs.dualScreenLauncher = !prefs.dualScreenLauncher
                 revision++
             }.takeIf { hasSecondScreen },
-            SettingRow(tk("HIDDEN GAMES"), RomFolder.hiddenRoms(this@SettingsActivity, prefs).size.takeIf { it > 0 }?.toString() ?: tk("NONE")) { screen = Screen.HIDDEN },
+            SettingRow(tk("COVER ART"), onOff(prefs.steamGridDbApiKey != null || prefs.raWebApiKey != null), opensPage = true, subtitle = "Box art from RetroAchievements and SteamGridDB") { screen = Screen.COVER_ART },
+            // Every game's media (box art, screenshots, logos, videos, facts): first for covers, and the launcher's other screen.
+            SettingRow("ScreenScraper", prefs.screenScraperAccount?.user?.uppercase() ?: tk("OFF"), opensPage = true) {
+                ssLogin.refresh(prefs) { r -> runOnUiThread { r() } }
+                screen = Screen.SCREENSCRAPER
+            }.takeIf { ScreenScraperClient.enabled },
+            SettingRow(tk("FOLDERS"), null, opensPage = true, subtitle = "Where ROMs, saves and states live") { screen = Screen.FOLDERS },
+            SettingRow(tk("HIDDEN GAMES"), RomFolder.hiddenRoms(this@SettingsActivity, prefs).size.takeIf { it > 0 }?.toString() ?: tk("NONE"), opensPage = true) { screen = Screen.HIDDEN },
             // A game's GameShark / Action Replay / CodeBreaker codes, on their own page.
-            SettingRow(tk("CHEATS"), onOff(prefs.cheatsEnabled)) { screen = Screen.CHEATS },
+            SettingRow(tk("CHEATS"), onOff(prefs.cheatsEnabled), opensPage = true, subtitle = "GameShark, Action Replay and CodeBreaker codes") { screen = Screen.CHEATS },
             groupTitle(tk("ONLINE")),
             // Signed in = on; the account's name, else OFF.
             SettingRow(
                 "RetroAchievements", prefs.raUsername?.uppercase() ?: tk("OFF"), labelBadge = tk("BETA"),
-                labelIcon = { GoldTrophy() },
+                labelIcon = { GoldTrophy() }, opensPage = true,
             ) { screen = Screen.ACHIEVEMENTS },
+            groupTitle(tk("CONTROLS")),
+            SettingRow(tk("GAME BUTTONS"), null, subtitle = "Key bindings: which button presses A, B, START...", opensPage = true) { screen = Screen.CONTROLS },
+            SettingRow(tk("HOTKEYS"), onOff(prefs.hotkeysEnabled), opensPage = true, subtitle = "Button combos for states, FF and more") { screen = Screen.HOTKEYS },
+            SettingRow(tk("QUICK MENU"), null, subtitle = "Actions on a held button", labelBadge = com.pokedaisy.app.companion.ui.quickMenuBadge(), opensPage = true) { screen = Screen.QUICK_MENU },
+            // Takes effect the next time a game is opened.
+            SettingRow(tk("TOUCH PAD"), TOUCH_NAMES[prefs.touchControlsMode], subtitle = "The on-screen buttons") {
+                selector = Selector(tk("TOUCH PAD"), TOUCH_NAMES, TOUCH_NAMES[prefs.touchControlsMode]) {
+                    prefs.touchControlsMode = TOUCH_NAMES.indexOf(it)
+                }
+            },
             groupTitle(tk("APP")),
-            // The manual (docs/manual, served by the website), readable offline once fetched.
-            SettingRow(tk("HELP"), null, subtitle = "The manual: how every screen and setting works") { screen = Screen.HELP },
+            // Tap: look for a newer release on GitHub now.
+            SettingRow(tk("VERSION"), if (updates.checking) tk("CHECKING…") else BuildConfig.VERSION_NAME) { updates.check(manual = true) },
+            // Back to the library, which opens the first-time setup again.
+            SettingRow(tk("RUN SETUP"), null, subtitle = "First-time setup again: folders, buttons, art") { prefs.setupRequested = true; finish() },
+            // Opt-in crash reports (CrashReports.kt); only in builds that can send them.
+            SettingRow(tk("CRASH REPORTS"), onOff(prefs.crashReportsEnabled), subtitle = "Send a report if the app crashes") {
+                CrashReports.setEnabled(prefs, !prefs.crashReportsEnabled)
+                revision++
+            }.takeIf { CrashReports.available },
+            // The GPL's notices and every bundled component's license.
+            SettingRow(tk("LICENSES"), null, opensPage = true) { screen = Screen.LICENSES },
             // AUTO: the ROM's language in game, the device's here. Applies at once, both screens.
             SettingRow("LANGUAGE", L10n.settingLabel(prefs.appLanguage)) {
                 val opts = L10n.options
@@ -647,17 +673,8 @@ class SettingsActivity : ComponentActivity() {
                     L10n.apply(prefs.appLanguage, null)
                 }
             },
-            // Opt-in crash reports (CrashReports.kt); only in builds that can send them.
-            SettingRow(tk("CRASH REPORTS"), onOff(prefs.crashReportsEnabled)) {
-                CrashReports.setEnabled(prefs, !prefs.crashReportsEnabled)
-                revision++
-            }.takeIf { CrashReports.available },
-            // Tap: look for a newer release on GitHub now.
-            SettingRow(tk("VERSION"), if (updates.checking) tk("CHECKING…") else BuildConfig.VERSION_NAME) { updates.check(manual = true) },
-            // The GPL's notices and every bundled component's license.
-            SettingRow(tk("LICENSES"), null) { screen = Screen.LICENSES },
-            // Back to the library, which opens the first-time setup again.
-            SettingRow(tk("RUN SETUP"), null) { prefs.setupRequested = true; finish() },
+            // The manual (docs/manual, served by the website), readable offline once fetched.
+            SettingRow(tk("HELP"), null, subtitle = "The manual: how every screen and setting works", opensPage = true) { screen = Screen.HELP },
         )
         // Search: every row whose name, value or keywords (SETTING_KEYWORDS: "rebind", "keybinds"...) match.
         val shown = filterRows(rows, searchQuery)
@@ -748,6 +765,41 @@ class SettingsActivity : ComponentActivity() {
                 prefs.companionShaders = !prefs.companionShaders
                 revision++
             },
+        )
+        Column(Modifier.fillMaxWidth()) {
+            OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                GroupedRows(rows, m, cursor = -1, onClick = { rows[it].onClick() })
+            }
+        }
+    }
+
+    /** FIELD HUD: the HUD over the overworld, like the companion's page; the game picks it up on resume. */
+    @Composable
+    private fun FieldHudScreen(m: GbaTextMetrics) {
+        @Suppress("UNUSED_EXPRESSION") revision
+        val rows = com.pokedaisy.app.companion.ui.fieldHudRows(
+            prefs.fieldHud, prefs.fieldHudStyle,
+            setOn = { prefs.fieldHud = it; revision++ },
+            setStyle = { prefs.fieldHudStyle = it; revision++ },
+        )
+        Column(Modifier.fillMaxWidth()) {
+            OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                GroupedRows(rows, m, cursor = -1, onClick = { rows[it].onClick() })
+            }
+        }
+    }
+
+    /** QUICK MENU: which actions it shows, like the companion's page; its button is HOTKEYS' QUICK MENU. */
+    @Composable
+    private fun QuickMenuScreen(m: GbaTextMetrics) {
+        @Suppress("UNUSED_EXPRESSION") revision
+        val binding = remember(revision) { Hotkeys.load(filesRoot).rawBindings[Hotkeys.Action.QUICK_MENU].orEmpty() }
+        val rows = com.pokedaisy.app.companion.ui.quickMenuRows(
+            prefs.quickMenuActions, binding.joinToString(", ") { it.replace("BUTTON_", "").replace('_', ' ') }, prefs.quickMenuStyle, prefs.quickMenuLabels,
+            setShown = { prefs.quickMenuActions = it; revision++ },
+            setStyle = { prefs.quickMenuStyle = it; revision++ },
+            setLabels = { prefs.quickMenuLabels = it; revision++ },
+            onHotkey = { screen = Screen.HOTKEYS },
         )
         Column(Modifier.fillMaxWidth()) {
             OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
@@ -1374,19 +1426,12 @@ class SettingsActivity : ComponentActivity() {
 
     // ---- hotkeys / game buttons -------------------------------------------
 
-    /** One rebindable row: tap to capture (the row turns white and the value
-     * reads PRESS KEYS…), tap again to cancel. */
-    @Composable
-    private fun CaptureRow(
-        label: String, keys: List<String>, isCapturing: Boolean, prompt: String, m: GbaTextMetrics,
-        divider: Boolean, enabled: Boolean = true, onClick: () -> Unit,
-    ) {
-        val value = when {
-            isCapturing && captured.isEmpty() -> prompt
-            isCapturing -> captured.joinToString(" + ") { keyLabel(Hotkeys.keyName(it)) }
-            else -> keys.joinToString(" / ") { keyLabel(it) }.ifEmpty { "-" }
-        }
-        OptionLine(label, value, selected = isCapturing, m, height = m.rowHeight * 1.2f, labelWeight = 0.5f, divider = divider, enabled = enabled, onClick = onClick)
+    /** A hotkey bound to [keys] - asked first when other hotkeys have exactly that chord (MOVE takes it off them). */
+    private fun bindHotkey(action: Hotkeys.Action, keys: List<Int>) {
+        val taken = Hotkeys.clashes(Hotkeys.load(filesRoot).rawBindings, action, keys.map { Hotkeys.keyName(it) })
+        if (taken.isEmpty()) Hotkeys.setBinding(filesRoot, action, keys)
+        else hotkeyClash = HotkeyClash(action, keys, taken)
+        revision++
     }
 
     @Composable
@@ -1397,20 +1442,6 @@ class SettingsActivity : ComponentActivity() {
                 tr("Tap a hotkey, then press one or more keys/buttons together and release — e.g. hold Select and tap R1 for a chord. BACK cancels."),
                 m, small,
             )
-            // While a hotkey waits for keys: CLEAR leaves it unbound ("-").
-            capturing?.let { action ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(m.u * 8),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = m.u * 4),
-                ) {
-                    OptionButton(tr("CLEAR {0}", tr(action.title)), m, modifier = Modifier.weight(1f), emphasis = true, onClick = {
-                        Hotkeys.clearBinding(filesRoot, action)
-                        revision++
-                        cancelCapture()
-                    })
-                    OptionButton(tk("CANCEL"), m, modifier = Modifier.weight(1f), onClick = ::cancelCapture)
-                }
-            }
             OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     // Off, the binds stay as they are, greyed out, and every key goes to the game.
@@ -1418,14 +1449,18 @@ class SettingsActivity : ComponentActivity() {
                     OptionLine(
                         tk("HOTKEYS"), if (on) tk("ON") else tk("OFF"), selected = false, m, height = m.rowHeight * 1.2f,
                         labelWeight = 0.5f, divider = true,
-                    ) { cancelCapture(); prefs.hotkeysEnabled = !on; revision++ }
+                    ) { capture.cancel(); prefs.hotkeysEnabled = !on; revision++ }
                     Hotkeys.Action.entries.forEachIndexed { i, action ->
-                        CaptureRow(
-                            action.title, hotkeys.rawBindings[action].orEmpty(),
-                            isCapturing = capturing == action, prompt = tk("PRESS KEYS…"), m = m,
-                            divider = i < Hotkeys.Action.entries.lastIndex, enabled = on,
+                        KeyBindRow(
+                            action.title, hotkeys.rawBindings[action], capture, m, small,
+                            divider = i < Hotkeys.Action.entries.lastIndex, enabled = on, labelBadge = action.badge,
                         ) {
-                            if (capturing == action) cancelCapture() else { cancelCapture(); capturing = action }
+                            com.pokedaisy.app.companion.KeyCapture.Request(
+                                action.title, chord = true,
+                                onDone = { keys -> bindHotkey(action, keys) },
+                                // CLEAR leaves it unbound ("-").
+                                onClear = { Hotkeys.clearBinding(filesRoot, action); revision++ },
+                            )
                         }
                     }
                 }
@@ -1441,18 +1476,21 @@ class SettingsActivity : ComponentActivity() {
             OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     GbaControls.Btn.entries.forEachIndexed { i, btn ->
-                        CaptureRow(
-                            "GBA ${btn.label}", ctrls[btn].orEmpty(),
-                            isCapturing = capturingCtrl == btn, prompt = tk("PRESS A BUTTON…"), m = m,
+                        KeyBindRow(
+                            "GBA ${btn.label}", ctrls[btn], capture, m, small,
                             divider = i < GbaControls.Btn.entries.lastIndex,
-                        ) {
-                            if (capturingCtrl == btn) cancelCapture() else { cancelCapture(); capturingCtrl = btn }
-                        }
+                        ) { controlRequest(btn) }
                     }
                 }
             }
         }
     }
+
+    private fun controlRequest(btn: GbaControls.Btn) = com.pokedaisy.app.companion.KeyCapture.Request(
+        "GBA ${btn.label}", chord = false,
+        onDone = { keys -> GbaControls.setBinding(filesRoot, btn, keys.first()); revision++ },
+        onClear = if (btn.canClear) ({ GbaControls.clearBinding(filesRoot, btn); revision++ }) else null,
+    )
 
     // ---- folders --------------------------------------------------------
 
@@ -1657,9 +1695,8 @@ class SettingsActivity : ComponentActivity() {
         const val REPO_URL = "https://github.com/lidor30/pokedaisy"
         /** A ROM path: open straight on that game's CHEATS (its library menu). */
         const val EXTRA_CHEATS_ROM = "cheats_rom"
-        /** Opens one page alone ([SCREEN_CONTROLS]: GAME BUTTONS, for setup; [SCREEN_HELP]: the manual); BACK finishes. */
+        /** Opens one page alone ([SCREEN_HELP]: the manual); BACK finishes. */
         const val EXTRA_SCREEN = "screen"
-        const val SCREEN_CONTROLS = "CONTROLS"
         const val SCREEN_HELP = "HELP"
         /** Cheat files are text; anything bigger isn't one. */
         const val MAX_CHEAT_FILE = 1 shl 20
@@ -1690,8 +1727,6 @@ class SettingsActivity : ComponentActivity() {
         const val COFFEE_URL = "https://buymeacoffee.com/lidor30g"
 
         fun rateLabel(v: Float) = if (v <= 0f) tk("INFINITE") else if (v % 1f == 0f) "${v.toInt()}×" else "$v×"
-
-        fun keyLabel(name: String) = name.replace("BUTTON_", "").replace('_', ' ')
 
         fun humanSize(bytes: Long): String = when {
             bytes >= 1 shl 20 -> "%.1f MB".format(bytes / 1048576.0)

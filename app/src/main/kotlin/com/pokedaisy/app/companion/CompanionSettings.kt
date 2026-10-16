@@ -11,12 +11,9 @@ import com.pokedaisy.app.companion.i18n.tk
  * [com.pokedaisy.app.EmulatorEngine] / touch-controls visibility,
  * not just persisting them to [com.pokedaisy.app.Prefs].
  *
- * Key/button rebinding here is a TAP-A-NAME-FROM-A-LIST picker, not "press the
- * button you want" — the Presentation on Screen-2 never receives physical
- * `KeyEvent`s (those go to the main Activity on the top screen), so there's no
- * way to capture a live keypress there. Picking from a list only needs touch,
- * which Screen-2 gets fine. Only single-key bindings are settable this way
- * (chords stay a top-screen-Settings-only feature).
+ * Key/button rebinding is by pressing the keys, never by picking a key's name: the Presentation on Screen-2
+ * never receives physical `KeyEvent`s (they go to the game's Activity), so the capture runs there
+ * ([keyCapture]) and the game's screen asks for the keys while a row here waits.
  */
 interface CompanionSettings {
     /** Fast-forward speed cap. 0 = unlimited. */
@@ -27,6 +24,41 @@ interface CompanionSettings {
     val gameSpeed: Float get() = 1f
     val gameSpeeds: List<Float> get() = listOf(0.25f, 0.5f, 1f, 1.5f, 2f, 3f, 4f)
     fun setGameSpeed(v: Float) {}
+
+    /** SCENE SPEEDS (GitHub #43 / #85): a battle's, a field text box's and a menu screen's speed while FF is off;
+     * 0 = SAME (GAME SPEED's) - see [com.pokedaisy.app.Prefs.battleSpeed]. */
+    val battleSpeed: Float get() = 0f
+    fun setBattleSpeed(v: Float) {}
+    val textSpeed: Float get() = 0f
+    fun setTextSpeed(v: Float) {}
+    val menuSpeed: Float get() = 0f
+    fun setMenuSpeed(v: Float) {}
+    /** BIKE / SURF SPEED - see [com.pokedaisy.app.Prefs.bikeSpeed]; [fieldMovesReadable]: the game's bike / surf state
+     * is read (FireRed / Emerald engines with their player struct found, Ruby / Sapphire by sprite). */
+    val bikeSpeed: Float get() = 0f
+    fun setBikeSpeed(v: Float) {}
+    val surfSpeed: Float get() = 0f
+    fun setSurfSpeed(v: Float) {}
+    val fieldMovesReadable: Boolean get() = false
+
+    /** Whether the running game's field can be read for TEXT SPEED and AUTO-RUN (WIDE's tables know it). */
+    val fieldReadable: Boolean get() = false
+
+    /** AUTO-RUN: B held while walking (holding it walks) - see [com.pokedaisy.app.Prefs.autoRun]. */
+    val autoRun: Boolean get() = false
+    fun setAutoRun(on: Boolean) {}
+
+    /** RUN INDOORS - see [com.pokedaisy.app.Prefs.runIndoors]; [runIndoorsSupported]: a FireRed / Emerald engine the
+     * field reads know (Ruby / Sapphire tell indoor maps by their type, which other things read too). */
+    val runIndoors: Boolean get() = false
+    fun setRunIndoors(on: Boolean) {}
+    val runIndoorsSupported: Boolean get() = false
+
+    /** WILD ENCOUNTERS: the percent left - see [com.pokedaisy.app.Prefs.wildEncounters]; [wildEncountersSupported]: the
+     * game's switch was found in the ROM ([com.pokedaisy.app.companion.data.WildEncounters]) and its field is read. */
+    val wildEncounters: Int get() = 100
+    fun setWildEncounters(percent: Int) {}
+    val wildEncountersSupported: Boolean get() = false
 
     /** Whether fast-forward is currently toggled on (independent of the hold trigger). */
     val ffToggled: Boolean
@@ -48,11 +80,17 @@ interface CompanionSettings {
     val touchControlsMode: Int
     fun setTouchControlsMode(v: Int)
 
+    /** Waits for the keys to bind (the game's activity gets every key); null where nothing can be pressed (previews). */
+    val keyCapture: KeyCapture? get() = null
+
     /** Current GBA-button bindings, by display name (e.g. "BUTTON_A", "Z"). */
     fun gbaControlBindings(): Map<GbaControls.Btn, List<String>>
 
     /** Rebinds a GBA button to a single key, by display name (no "KEYCODE_" prefix). */
     fun setGbaControlBinding(btn: GbaControls.Btn, keyName: String)
+
+    /** Leaves TURBO A / B unbound ([GbaControls.Btn.canClear]). */
+    fun clearGbaControlBinding(btn: GbaControls.Btn) {}
 
     /** Whether the hotkeys fire at all ([com.pokedaisy.app.Prefs.hotkeysEnabled]). */
     val hotkeysEnabled: Boolean
@@ -61,10 +99,9 @@ interface CompanionSettings {
     /** Current hotkey bindings, by display name. */
     fun hotkeyBindings(): Map<Hotkeys.Action, List<String>>
 
-    /** Rebinds a hotkey to a single key, by display name — replaces any existing
-     * chord with just this one key; null unbinds it. The key comes off [takeFrom]
-     * (other hotkeys that had exactly it, moved by the player's MOVE). */
-    fun setHotkeyBinding(action: Hotkeys.Action, keyName: String?, takeFrom: List<Hotkeys.Action> = emptyList())
+    /** Rebinds a hotkey to one chord, by display names (pressed together) — replaces what it had; null unbinds it.
+     * The chord comes off [takeFrom] (other hotkeys that had exactly it, moved by the player's MOVE). */
+    fun setHotkeyBinding(action: Hotkeys.Action, keyNames: List<String>?, takeFrom: List<Hotkeys.Action> = emptyList())
 
     /** Hard-restarts the running game: stops the core, discards any pending
      * suspend-resume state, and reboots the same ROM re-reading its save file
@@ -128,6 +165,26 @@ interface CompanionSettings {
     val statusBarOnCompanion: Boolean get() = false
     fun setStatusBarOnCompanion(on: Boolean) {}
 
+    /** SETTINGS > HUD: the HUD over the overworld - see [Prefs.fieldHud]. */
+    val fieldHud: Boolean get() = true
+    fun setFieldHud(on: Boolean) {}
+
+    /** SETTINGS > BATTLE BUTTONS: one screen, FIGHT, POKéMON and RUN beside a battle - see [Prefs.battleButtons]. */
+    val battleButtons: Boolean get() = true
+    fun setBattleButtons(on: Boolean) {}
+
+    /** The FIELD HUD's layout, look, size and parts - see [Prefs.fieldHudStyle]. */
+    val fieldHudStyle: com.pokedaisy.app.companion.FieldHudStyle get() = com.pokedaisy.app.companion.FieldHudStyle()
+    fun setFieldHudStyle(style: com.pokedaisy.app.companion.FieldHudStyle) {}
+
+    /** SETTINGS > QUICK MENU: the actions it shows - see [Prefs.quickMenuActions]. */
+    val quickMenuActions: Set<com.pokedaisy.app.companion.QuickAction> get() = com.pokedaisy.app.companion.QuickAction.entries.toSet()
+    fun setQuickMenuActions(actions: Set<com.pokedaisy.app.companion.QuickAction>) {}
+    val quickMenuStyle: com.pokedaisy.app.companion.QuickMenuStyle get() = com.pokedaisy.app.companion.QuickMenuStyle.RING
+    fun setQuickMenuStyle(style: com.pokedaisy.app.companion.QuickMenuStyle) {}
+    val quickMenuLabels: Boolean get() = true
+    fun setQuickMenuLabels(on: Boolean) {}
+
     /** FPS / CPU over the game's corner - see [Prefs.showPerformance]. */
     val showPerformance: Boolean get() = false
     fun setShowPerformance(on: Boolean) {}
@@ -177,8 +234,16 @@ interface CompanionSettings {
     /** Whether this device can run SMOOTHING (OpenGL ES 3); without it the row is greyed out. */
     val smoothingAvailable: Boolean get() = true
 
-    /** Whether there's a second screen - SWAP SCREENS only shows then. */
+    /** Whether there's a second screen - SINGLE SCREEN only shows then. */
     val hasSecondScreen: Boolean get() = false
+
+    /** A second screen played on one anyway - see [com.pokedaisy.app.Prefs.singleScreen]. */
+    val singleScreen: Boolean get() = false
+    fun setSingleScreen(on: Boolean) {}
+
+    /** The companion is on the second screen (there is one, and SINGLE SCREEN is off): SWAP SCREENS shows, the
+     * one-screen rows (BATTLE BUTTONS, COMPANION VIEW) don't. */
+    val usesSecondScreen: Boolean get() = hasSecondScreen && !singleScreen
 
     /**
      * A phone held upright: the companion right under the game (true; the touch pad gets the
@@ -187,6 +252,13 @@ interface CompanionSettings {
      */
     val portraitUnderGame: Boolean? get() = null
     fun setPortraitUnderGame(on: Boolean) {}
+
+    /**
+     * One screen held sideways: the companion as a window in the middle over the game (true) or the side panel -
+     * see [com.pokedaisy.app.Prefs.companionWindow]. Null when the companion isn't on the game's screen sideways: no row.
+     */
+    val companionWindow: Boolean? get() = null
+    fun setCompanionWindow(on: Boolean) {}
 
     /** The game on the second screen and the companion on the main one - see [Prefs.swapScreens]. */
     val swapScreens: Boolean get() = false
@@ -243,6 +315,9 @@ enum class FfMode(val label: String) {
     NORMAL(tk("NORMAL")),
 }
 
+
+/** SCENE SPEEDS' choices, SAME (0: GAME SPEED's) first. */
+val SCENE_SPEEDS = listOf(0f, 1f, 1.5f, 2f, 3f, 4f)
 
 /** SETTINGS > ASPECT: how the game sits on its screen, in the order the pickers list them.
  * [label] stays English; the rows translate it. */

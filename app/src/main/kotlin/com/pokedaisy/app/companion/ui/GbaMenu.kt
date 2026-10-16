@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.contentDescription
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.pokedaisy.app.companion.data.GameKind
 import com.pokedaisy.app.companion.data.activeGame
+import com.pokedaisy.app.companion.data.isGameBoyGame
 import com.pokedaisy.app.companion.ui.theme.AppColors
 import com.pokedaisy.app.companion.ui.theme.gbaFocusRing
 import androidx.compose.ui.focus.onFocusChanged
@@ -88,7 +90,8 @@ object OptionColors {
     // Read through activeGame like the rest of the per-game look (CompanionScreen is
     // keyed on the game, so a switch redraws) - only while a game is open ([inGame]):
     // the top-screen Library / Settings keep the app's own look after Yellow closes.
-    private val gen1 get() = inGame && activeGame == GameKind.YELLOW
+    // Crystal's (Gen 2) menus are the same black-on-white text boxes.
+    private val gen1 get() = inGame && activeGame.isGameBoyGame
 
     /** A game's screens are up (PokeDaisyActivity resumed); Compose state, so the look follows at once. */
     var inGame: Boolean
@@ -206,6 +209,62 @@ object OptionColors {
     }
 }
 
+/**
+ * The OPTION look's colours for one part of the UI, read through [optionLook]: [Live] (OptionColors, the default,
+ * dark mode included) unless a screen lays another over it with [LocalOptionLook] - the FIELD HUD's GLASS panels.
+ * Only the summary screens (MonDetailScreen and its sections) and [OptionListWindow] read it so far.
+ */
+interface OptionLook {
+    val label: Color
+    val labelShadow: Color
+    val value: Color
+    val valueShadow: Color
+    val muted: Color
+    val mutedShadow: Color
+    val titleFill: Color
+    val listFill: Color
+    val listLayers: List<Pair<Color, Int>>
+    /** A bar's dark outline (the summary's HP / EXP / IV bars). */
+    val frameDark: Color
+    /** The summary's [Separator]: a dark line over a light one. */
+    val separatorDark: Color
+    val separatorLight: Color
+    /** The summary's party strip: the squares, and the shown Pokémon's. */
+    val stripIdle: Color
+    val stripIdleFrame: Color
+    val stripLit: Color
+    val stripLitFrame: Color
+    /** More room inside [OptionListWindow] at its left and right, in GBA pixels (the HUD's summary). */
+    val windowPadSides: Int get() = 0
+
+    /** [OptionColors] itself, read when used (so dark mode follows at once). */
+    object Live : OptionLook {
+        override val label get() = OptionColors.label
+        override val labelShadow get() = OptionColors.labelShadow
+        override val value get() = OptionColors.value
+        override val valueShadow get() = OptionColors.valueShadow
+        override val muted get() = OptionColors.muted
+        override val mutedShadow get() = OptionColors.mutedShadow
+        override val titleFill get() = OptionColors.titleFill
+        override val listFill get() = OptionColors.listFill
+        override val listLayers get() = OptionColors.listLayers
+        override val frameDark get() = OptionColors.frameDark
+        override val separatorDark get() = if (OptionColors.dark) Color(0xFF0E1116) else Color(0xFFB8B8C0)
+        override val separatorLight get() = if (OptionColors.dark) Color(0xFF3A414D) else Color(0xFFE8E8EC)
+        // A slate blue, the lit one white (dark mode: deeper, the lit one the cursor row's).
+        override val stripIdle get() = if (OptionColors.dark) Color(0xFF2E3A52) else Color(0xFFA8B4C8)
+        override val stripIdleFrame get() = if (OptionColors.dark) Color(0xFF151B27) else Color(0xFF68748C)
+        override val stripLit get() = if (OptionColors.dark) Color(0xFF4A5468) else Color(0xFFF8F8F8)
+        override val stripLitFrame get() = if (OptionColors.dark) Color(0xFF6F7A90) else Color(0xFFC0C8D8)
+    }
+}
+
+val LocalOptionLook = androidx.compose.runtime.staticCompositionLocalOf<OptionLook> { OptionLook.Live }
+
+/** The [OptionLook] here. */
+val optionLook: OptionLook
+    @Composable get() = LocalOptionLook.current
+
 /** A dashed row divider along the bottom edge, from [start] px in - the bag
  * list's 6-on/2-off dash, 2 GBA px thick. [u] is one GBA pixel in px. */
 fun DrawScope.drawRowDivider(color: Color, u: Float, start: Float) {
@@ -263,8 +322,13 @@ fun OptionTitleWindow(
         leading?.let { it(); Spacer(Modifier.width(u * 6)) }
         if (onBack != null) {
             CompanionBackHandler(onBack = onBack)
-            Box(Modifier.soundClickable(onClick = onBack).padding(end = u * 6)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("Back"), tint = OptionColors.titleText, modifier = Modifier.size(m.lineHeight))
+            // Not a D-pad stop: B / BACK is the same thing, and the arrow has no focused look.
+            Box(Modifier.focusProperties { canFocus = false }.soundClickable(onClick = onBack).padding(end = u * 6)) {
+                // A pixel arrow, a font pixel per cell like the title beside it.
+                val cell = with(androidx.compose.ui.platform.LocalDensity.current) { m.fontPixel.toDp() }
+                Box(Modifier.size(m.lineHeight).semantics { contentDescription = tr("Back") }, contentAlignment = Alignment.Center) {
+                    ShadowedPixelIcon(PixelIcons.arrowBack, OptionColors.titleText, OptionColors.titleShadow, m, cell = cell)
+                }
             }
         }
         if (trailing == null) {
@@ -286,15 +350,17 @@ fun OptionTitleWindow(
 fun OptionListWindow(
     m: GbaTextMetrics,
     modifier: Modifier = Modifier,
-    fill: Color = OptionColors.listFill,
+    fill: Color = optionLook.listFill,
     content: @Composable () -> Unit,
 ) {
     val u = m.u
-    val frame = OptionColors.listLayers.sumOf { it.second }
+    val look = optionLook
+    val layers = look.listLayers
+    val frame = layers.sumOf { it.second }
     Box(
         modifier = modifier
-            .drawBehind { drawLayeredBox(OptionColors.listLayers.inPx(u.toPx()), fill, radius = 2 * u.toPx()) }
-            .padding(u * (frame + 2)),
+            .drawBehind { drawLayeredBox(layers.inPx(u.toPx()), fill, radius = 2 * u.toPx()) }
+            .padding(horizontal = u * (frame + 2 + look.windowPadSides), vertical = u * (frame + 2)),
     ) { content() }
 }
 
@@ -324,16 +390,26 @@ fun OptionLine(
     enabled: Boolean = true,
     /** A smaller grey line under the label: what the row is for. */
     subtitle: String? = null,
+    /** The row took the D-pad's focus: a list whose cursor follows it (SETTINGS, so only one row is white). */
+    onFocus: (() -> Unit)? = null,
+    /** A pixel chevron at the row's right end: it opens a page of its own. */
+    chevron: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    if (onFocus != null) {
+        val current by androidx.compose.runtime.rememberUpdatedState(onFocus)
+        androidx.compose.runtime.LaunchedEffect(focused) { if (focused) current() }
+    }
     // A pop-up this row opens gives the focus back to it ([OverlayStack]); in a pop-up, the current choice starts focused.
     val stack = LocalOverlayStack.current
     val self = remember { FocusRequester() }
     if (enabled) LocalOverlayStart.current?.register(self, current = selected)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    val chevronCell = with(androidx.compose.ui.platform.LocalDensity.current) { m.fontPixel.toDp() }
+    val chevronRoom = if (chevron) chevronCell * (PixelIcons.chevronRight.maxOf { it.length } + 1) + m.u * 4 else 0.dp
+    Box(
+        contentAlignment = Alignment.CenterStart,
         modifier = modifier
             .focusRequester(self)
             .fillMaxWidth()
@@ -343,24 +419,44 @@ fun OptionLine(
             .then(if (enabled) Modifier.soundClickable(interactionSource = interaction, indication = null, onClick = { stack?.lastClicked = self; onClick() }) else Modifier)
             .padding(horizontal = m.u * 8),
     ) {
-        Column(Modifier.weight(labelWeight)) {
+        Column(Modifier.fillMaxWidth()) {
+            // The label and value columns stay where they are with or without a chevron, so values line up down a list.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                labelIcon?.let { Box(Modifier.size(m.lineHeight)) { it() }; Spacer(Modifier.width(m.u * 4)) }
-                if (enabled) GbaText(tr(label), OptionColors.label, OptionColors.labelShadow, m)
-                else GbaText(tr(label), OptionColors.muted, OptionColors.mutedShadow, m)
-                labelBadge?.let { OptionBadge(it, m, Modifier.padding(start = m.u * 6)) }
+                Row(Modifier.weight(labelWeight), verticalAlignment = Alignment.CenterVertically) {
+                    labelIcon?.let { Box(Modifier.size(m.lineHeight)) { it() }; Spacer(Modifier.width(m.u * 4)) }
+                    if (enabled) GbaText(tr(label), OptionColors.label, OptionColors.labelShadow, m)
+                    else GbaText(tr(label), OptionColors.muted, OptionColors.mutedShadow, m)
+                    labelBadge?.let {
+                        // NEW (a just-shipped feature, companion.NewFeatures) in the Library's green; anything else red.
+                        val new = it == com.pokedaisy.app.companion.NewFeatures.NEW_TAG
+                        OptionBadge(
+                            it, m, Modifier.padding(start = m.u * 6),
+                            fill = if (new) OptionColors.newBadge else OptionColors.value,
+                            shadow = if (new) OptionColors.newBadgeShadow else OptionColors.valueShadow.copy(alpha = 0.6f),
+                        )
+                    }
+                }
+                if (value != null) {
+                    Row(Modifier.weight(1f - labelWeight).padding(end = chevronRoom), verticalAlignment = Alignment.CenterVertically) {
+                        if (enabled) GbaText(tr(value), OptionColors.value, OptionColors.valueShadow, m)
+                        else GbaText(tr(value), OptionColors.muted, OptionColors.mutedShadow, m)
+                        valueBadge?.let { OptionBadge(it, m, Modifier.padding(start = m.u * 6)) }
+                    }
+                }
             }
+            // Under the label and the value both: the whole row's width, so it isn't cut off beside a value.
             subtitle?.let {
                 val small = rememberGbaTextMetrics(0.8f * m.fontPixel / m.px)
-                GbaText(tr(it), OptionColors.muted, OptionColors.mutedShadow, small)
+                GbaText(tr(it), OptionColors.muted, OptionColors.mutedShadow, small, modifier = Modifier.padding(end = chevronRoom))
             }
         }
-        if (value != null) {
-            Row(Modifier.weight(1f - labelWeight), verticalAlignment = Alignment.CenterVertically) {
-                if (enabled) GbaText(tr(value), OptionColors.value, OptionColors.valueShadow, m)
-                else GbaText(tr(value), OptionColors.muted, OptionColors.mutedShadow, m)
-                valueBadge?.let { OptionBadge(it, m, Modifier.padding(start = m.u * 6)) }
-            }
+        if (chevron) {
+            ShadowedPixelIcon(
+                PixelIcons.chevronRight,
+                if (enabled) OptionColors.label else OptionColors.muted,
+                if (enabled) OptionColors.labelShadow else OptionColors.mutedShadow,
+                m, cell = chevronCell, modifier = Modifier.align(Alignment.CenterEnd),
+            )
         }
     }
 }
@@ -403,6 +499,10 @@ fun OptionRows(
     valueBadge: (Int) -> String? = { null },
     /** False greys row i out ([OptionLine]'s enabled). */
     enabled: (Int) -> Boolean = { true },
+    /** An [OptionBadge] after row i's label (NEW). */
+    labelBadge: (Int) -> String? = { null },
+    /** Row i took the D-pad's focus (the cursor follows it). */
+    onFocused: ((Int) -> Unit)? = null,
 ) {
     BoxWithConstraints(modifier) {
         val rowHeight = if (rows.isEmpty() || maxHeight == Dp.Infinity) minRow
@@ -410,8 +510,10 @@ fun OptionRows(
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             rows.forEachIndexed { i, (label, value, onClick) ->
                 OptionLine(
-                    label, value, selected = i == selected, m, height = rowHeight, labelWeight = labelWeight,
-                    divider = dividers && i < rows.lastIndex, valueBadge = valueBadge(i), enabled = enabled(i), onClick = onClick,
+                    label, value, selected = i == selected, m, modifier = Modifier.focusStart(i == selected),
+                    height = rowHeight, labelWeight = labelWeight,
+                    divider = dividers && i < rows.lastIndex, valueBadge = valueBadge(i), enabled = enabled(i), labelBadge = labelBadge(i),
+                    onFocus = onFocused?.let { f -> { f(i) } }, onClick = onClick,
                 )
             }
         }
@@ -441,6 +543,8 @@ fun OptionButton(
     labelColors: Pair<Color, Color>? = null,
     /** The frame's layers, when it isn't the title window's ([OptionColors.fieldMoveLayers]). */
     frameLayers: List<Pair<Color, Int>>? = null,
+    /** The room either side of the content, in GBA pixels: less for a row of icon buttons on a narrow screen. */
+    sidePadding: Int = 8,
 ) {
     val u = m.u
     val interaction = remember { MutableInteractionSource() }
@@ -476,7 +580,7 @@ fun OptionButton(
                 )
             }
             .soundClickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = { stack?.lastClicked = self; onClick() })
-            .padding(horizontal = u * 8, vertical = u * 4),
+            .padding(horizontal = u * sidePadding, vertical = u * 4),
     ) {
         if (icon != null) {
             Icon(icon, contentDescription, tint = fg, modifier = Modifier.size(m.lineHeight))
@@ -511,6 +615,15 @@ fun OptionOverlay(onDismiss: () -> Unit, modifier: Modifier = Modifier, content:
     val stack = LocalOverlayStack.current
     // Where the focus starts: the current choice if there is one, else the first control (they register as they compose).
     val start = remember { OverlayStart() }
+    // The companion's window: the D-pad starts here, not behind, when nothing has the focus (it was opened by a tap).
+    val starts = LocalFocusStarts.current
+    if (stack != null && starts != null) {
+        androidx.compose.runtime.DisposableEffect(start) {
+            val entry: () -> FocusRequester? = { start.preferred ?: start.first }
+            starts.entries += entry
+            onDispose { starts.entries -= entry }
+        }
+    }
     if (stack != null) {
         val dismiss by androidx.compose.runtime.rememberUpdatedState(onDismiss)
         val e = remember { OverlayStack.Entry({ dismiss() }, stack.lastClicked) }
@@ -608,19 +721,26 @@ fun <T> OptionSelector(
             val u = m.u
             val room = if (maxHeight == Dp.Infinity) m.rowHeight * 20 else maxHeight - u * 40 - m.lineHeight
             val rowHeight = (room / (options.size + 1)).coerceIn(m.rowHeight, m.rowHeight * 1.3f)
+            // The D-pad's row (index, options.size = CANCEL): while it's on another one, the current choice keeps
+            // its marker but not the white, so one row is lit.
+            var focusedRow by remember { mutableStateOf(-1) }
             Column {
                 OptionTitleWindow(title, m, onBack = onDismiss)
                 Spacer(Modifier.height(u * 4))
                 OptionListWindow(m, Modifier.fillMaxWidth()) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        options.forEach { opt ->
+                        options.forEachIndexed { i, opt ->
                             val on = opt == selected
                             OptionLine(
-                                label(opt), if (on) "◀" else null, selected = on, m,
+                                label(opt), if (on) "◀" else null, selected = on && (focusedRow < 0 || focusedRow == i), m,
                                 height = rowHeight, labelWeight = 0.85f, divider = true, labelBadge = badge(opt),
+                                onFocus = { focusedRow = i },
                             ) { onPick(opt) }
                         }
-                        OptionLine(tk("CANCEL"), null, selected = false, m, height = rowHeight, onClick = onDismiss)
+                        OptionLine(
+                            tk("CANCEL"), null, selected = false, m, height = rowHeight,
+                            onFocus = { focusedRow = options.size }, onClick = onDismiss,
+                        )
                     }
                 }
             }
@@ -646,9 +766,11 @@ fun OptionConfirm(
             Spacer(Modifier.height(m.u * 4))
             OptionListWindow(m, Modifier.fillMaxWidth()) {
                 Column {
+                    // A long message on a small screen scrolls; the buttons stay below it, on screen.
                     GbaText(
                         message, OptionColors.label, OptionColors.labelShadow, m, maxLines = Int.MAX_VALUE,
-                        modifier = Modifier.padding(horizontal = m.u * 8, vertical = m.u * 4),
+                        modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                            .padding(horizontal = m.u * 8, vertical = m.u * 4),
                     )
                     // Side by side, each a framed button.
                     Row(
@@ -669,7 +791,7 @@ fun OptionConfirm(
 fun GameBackdrop(game: GameKind, modifier: Modifier = Modifier.fillMaxSize()) {
     val bg = rememberGameBackground(game) ?: return
     // Dark mode: the game's art at night, under a blue-black scrim (Gen 1's white nearly all the way).
-    val scrim = OptionColors.backdropScrim.let { if (it > 0f && game == GameKind.YELLOW) 0.9f else it }
+    val scrim = OptionColors.backdropScrim.let { if (it > 0f && game.isGameBoyGame) 0.9f else it }
     @Suppress("NAME_SHADOWING")
     val modifier = if (scrim > 0f) modifier.drawWithContent { drawContent(); drawRect(NIGHT.copy(alpha = scrim)) } else modifier
     if (bg.tiled) {

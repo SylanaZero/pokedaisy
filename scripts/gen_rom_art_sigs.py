@@ -20,7 +20,7 @@ put it. Source: the pinned decomp builds (see CLAUDE.md) and their ELFs.
 Usage: scripts/gen_rom_art_sigs.py   (needs $DECOMPS/pokefirered and
 $DECOMPS/pokeemerald built once, and the hack ROMs at the *_ROM paths below - Unbound /
 Radical Red / Odyssey / Amethyst / Sword and Shield Ultimate Plus / Heart and Soul / Lazarus / Seaglass / SoulGold / Glazed / Imperium /
-Quetzal / R.O.W.E. / Super Mariomon; a missing one keeps its rows as they were. Re-run only if a pin changes)
+Quetzal / R.O.W.E. / Super Mariomon / Recharged Emerald, and $DECOMPS/pokelegacy built; a missing one keeps its rows as they were. Re-run only if a pin changes)
 """
 import os
 import subprocess
@@ -89,7 +89,7 @@ def first_rom(*names):
     return next((GBA_DIR + n for n in names if os.path.exists(GBA_DIR + n)), GBA_DIR + names[0])
 
 
-UNBOUND_ROM = first_rom("Pokemon - Unbound (v2.1.1.1).gba", "Pokémon Unbound (v2.1.1.1).gba")
+UNBOUND_ROM = first_rom("Pokemon Unbound (v2.1.1.1).gba", "Pokemon Unbound (v2.1.1.1).gba")
 UNBOUND_PIC_TABLE = 0x23957C
 UNBOUND_PAL_TABLE = 0x239A1C
 
@@ -113,12 +113,12 @@ def unbound_symbols(rom):
 # The font, the Poke Ball (only Unbound draws one) and both sprite palettes are FireRed's own
 # bytes, which FR_FONT_SMALL / FR_BALL_* / FR_STATUS_PAL already find. Only the status icons
 # differ per hack.
-RADICAL_RED_ROM = GBA_DIR + "Pokemon - Radical Red (v4.1).gba"
-ODYSSEY_ROM = GBA_DIR + "Pokémon Odyssey (English) (v4.1.1).gba"
+RADICAL_RED_ROM = GBA_DIR + "Pokemon Radical Red (v4.1).gba"
+ODYSSEY_ROM = GBA_DIR + "Pokemon Odyssey (v4.1.1).gba"
 AMETHYST_ROM = GBA_DIR + "Pokemon Amethyst (v1.3.0).gba"  # v1.4.1's status icons are the same bytes
 # Sword and Shield Ultimate Plus kept CFRU's party tiles, backdrop tilemap and slot tilemaps byte for
 # byte; only its palette (Galar red / charcoal) is its own (its status icons are Odyssey's).
-SWORD_SHIELD_ROM = GBA_DIR + "Sword and Shield Ultimate Plus (1.2.1.2).gba"
+SWORD_SHIELD_ROM = GBA_DIR + "Pokemon Sword and Shield Ultimate Plus (v1.2.1.2).gba"
 
 
 def cfru_symbols(rom):
@@ -137,8 +137,17 @@ def cfru_symbols(rom):
 LAZARUS_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon Lazarus (v2.0).gba")
 
 
+# Its TRAINER CARD is Emerald's Hoenn trainer_card.c with its own art (found from a headless VRAM dump of the open card and
+# the card code's literal pools; rendered from these, the game's own frames matched pixel for pixel): the card's tiles and
+# front / back tilemaps, its 0- and 1-star palettes (the rest, the backdrop tilemap and the female palette are retail's
+# bytes), its badges, the player's front pics (trainer pics 0x6B / 0x6C) and its own FONT_NORMAL.
 def lazarus_symbols(rom):
-    return {"RegionGfx": (0xCE1D20, 0), "RegionMap": (0xCE3248, 0), "RegionPal": (0xCE1CE0, 0x40)}
+    return {"RegionGfx": (0xCE1D20, 0), "RegionMap": (0xCE3248, 0), "RegionPal": (0xCE1CE0, 0x40),
+            "CardGfx": (0x51FE6C, 0), "CardFront": (0x5202AC, 0), "CardBack": (0x520438, 0),
+            "CardPal0": (0x51FE0C, 0x60), "CardPal1": (0xE4E5BC, 0x60),
+            "BadgesPal": (0xE4E8FC, 0x20), "BadgesGfx": (0xE4E9DC, 0),
+            "PicMale": (0x45160C, 0), "PicMalePal": (0x451B78, 0), "PicFemale": (0x4518C4, 0), "PicFemalePal": (0x451B90, 0),
+            "FontNormal": (0x80FABC, 0x8000), "FontNormalWidths": (0x817ABC, 0x200)}
 
 
 # Pokemon SoulGold v1.1.4 (sha1 ea5d369c...): a newer pokeemerald-expansion
@@ -146,16 +155,27 @@ def lazarus_symbols(rom):
 # with the bag open, matched byte for byte). The literal pool next to the bag's
 # graphics loads (ROM 0x0A3444) holds its smol tiles (mode 6, 80 tiles), its
 # smol tilemap (mode 8, 32x32) and the raw palette (BG palette 0).
-SOULGOLD_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon-SoulGold-v1.1.4.gba")
+SOULGOLD_ROM = first_rom("Pokemon SoulGold (v1.1.4).gba", "Pokemon-SoulGold-v1.1.4.gba")
 
 
 # Its Johto region map is Emerald's region_map.c with smol art: 8bpp tiles
 # (mode 5), the 64x64 one-byte tilemap (mode 8) and 3 palettes loaded at BG
 # palette 7 (raw, 0x60), checked by rendering them (sRegionMapBg_*).
+# Its TRAINER CARD is expansion's trainer_card.c on Emerald's Hoenn layout with its own Johto art (from a headless VRAM
+# dump of the open card and the card code, 0x0826AB34; rendered from these, the game's frames matched pixel for pixel in
+# all four builds): smol tiles (mode 6) and tilemaps (mode 8), a palette per star count, badges (smol mode 3), its
+# player pics (trainer pics 71 / 72) and FONT_NORMAL (Emerald's with glyph 0x38 redrawn, its own widths). The star's
+# palette is retail's bytes (CARD_STAR_PAL).
 def soulgold_symbols(rom):
     return {
         "BagStarsGfx": (0x6AED68, 0), "BagStarsMap": (0x6AE9F4, 0), "BagStarsPal": (0x6AF0D8, 0x20),
         "RegionGfx": (0xF39DA0, 0), "RegionMap": (0xF39AC4, 0), "RegionPal": (0xF37148, 0x60),
+        "CardGfx": (0x66BB14, 0), "CardFront": (0x66B958, 0), "CardBack": (0x66B8C0, 0), "CardBg": (0x66BB00, 0),
+        "CardPal0": (0x66BE54, 0x60), "CardPal1": (0x13D097C, 0x60), "CardPal2": (0x13D08BC, 0x60),
+        "CardPal3": (0x13D07FC, 0x60), "CardPal4": (0x13D073C, 0x60), "CardFemalePal": (0x13D0100, 0x20),
+        "BadgesPal": (0x13D00E0, 0x20), "BadgesGfx": (0x13D03D8, 0),
+        "PicMale": (0x70C31C, 0), "PicMalePal": (0x70C2FC, 0x20), "PicFemale": (0x70C044, 0), "PicFemalePal": (0x70C024, 0x20),
+        "FontNormal": (0x61ADE8, 0x8000), "FontNormalWidths": (0x61ABE8, 0x200),
     }
 
 
@@ -174,13 +194,13 @@ def seaglass_symbols(rom):
 # LoadRegionMapGfx's literal pool still names retail's addresses - the 8bpp tiles
 # (LZ77), the 64x32 one-byte tilemap (LZ77; retail's is 64x64) and the palette
 # (two palettes' worth: its tiles use colours 1-24 at BG palette 7).
-GLAZED_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Glazed (9.2.0).gba")
+GLAZED_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon Glazed (v9.2.0).gba")
 
 
 # Pokemon Emerald Imperium v1.3.1 (sha1 1d20091c...), pokeemerald-expansion 1.10: Emerald's
 # region map with markers for its five new places - 7 tiles added to the 8bpp tiles (LZ77) and
 # 4 cells changed in the 64x64 tilemap (LZ77); the palette is Emerald's own (EM_REGION_PAL).
-IMPERIUM_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Emerald Imperium (v1.3.1).gba")
+IMPERIUM_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon Emerald Imperium (v1.3.1).gba")
 
 
 def imperium_symbols(rom):
@@ -193,7 +213,7 @@ def imperium_symbols(rom):
 # pixel, 3 tiles left and 2 up of FireRed's screen) redrawn for Emerald's region_map.c - 8bpp
 # tiles and a 64x64 affine tilemap per map (LZ77), FireRed's palette loaded at BG palette 7. Its
 # map code's literal pool (ROM 0x1221B54) lists the four tile blobs, then the four tilemaps.
-QUETZAL_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/PokemonQuetzalEnglishAlpha9v0.gba")
+QUETZAL_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon Quetzal (Alpha 9.0) (English).gba")
 
 
 def quetzal_symbols(rom):
@@ -205,7 +225,7 @@ def quetzal_symbols(rom):
 # Pokemon Heart and Soul v2.0.6 (sha1 79ee6df0...): Emerald's region_map.c with smol art and seven
 # maps (gRegionMapInfos 0x08D4D330); the Johto + Kanto one ([6], REGION_MAP_JK): mode-5 tiles and a
 # mode-8 tilemap (equal to VRAM with the Pokegear map up, byte for byte), Emerald's palette.
-HNS_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokémon Heart and Soul (v2.0.6).gba")
+HNS_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon Heart and Soul (v2.0.6).gba")
 
 
 def hns_symbols(rom):
@@ -223,7 +243,7 @@ def hns_symbols(rom):
 # Pokemon R.O.W.E. v2.1.9.1 Experimental (sha1 81bd0f4b...): Emerald's region_map.c with three maps
 # picked by gMapHeader.region - Hoenn, Kanto, Sevii: 8bpp tiles and a 64x64 affine tilemap each
 # (LZ77), one palette (sRegionMapBg_Pal, at BG palette 7). Its own symbol table names them.
-ROWE_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokémon R.O.W.E. (v2.1.9.1 Experimental).gba")
+ROWE_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Pokemon R.O.W.E. (v2.1.9.1 Experimental).gba")
 
 
 def rowe_symbols(rom):
@@ -236,12 +256,41 @@ def rowe_symbols(rom):
 # tilemap and palette (the same bytes in all five releases) - and its own head for the map's
 # player icon in the BRENDAN slot (CreateRegionMapPlayerIcon's pool: an 11-colour palette packed
 # right before the 16x16 tiles; MAY's slot keeps retail's).
-MARIOMON_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Super Mariomon v1.5.1-Anniversary.gba")
+MARIOMON_ROM = os.path.expanduser("~/Downloads/Game ROMs & Emulation/gba/Super Mariomon (v1.5.1 Anniversary).gba")
 
 
 def mariomon_symbols(rom):
     return {"RegionGfx": (0x834E48, 0), "RegionMap": (0x835C34, 0), "RegionPal": (0x834E08, 0x40),
             "PlayerGfx": (0x835FD6, 0x80), "PlayerPal": (0x835FC0, 0x20)}
+
+
+# Pokémon Recharged Emerald v2.2.8 (sha1 56c97772...; v2.2.5 and Rebalanced hold the same bytes): a gcc pokeemerald
+# whose art is recompressed (another LZ77 encoder: none of Emerald's heads match) and partly redrawn. Found headless:
+# the party menu's VRAM / palette RAM matched against every LZ77 stream in the ROM (the backdrop tiles, 80 of them, a
+# few overwritten by text windows; its palette and status palette are its own, the tilemap and status icons
+# Emerald's data recompressed, the Poké Ball Emerald's bytes: EM_BALL_*); the slot tilemaps are Emerald's bytes (EM_SLOT_*); FONT_SMALL by retail's glyphs'
+# votes (five glyphs changed). The region map (redrawn) from region_map.c's literal pools (0x081A2784 / 0x081A2788,
+# the palette the raw 64 bytes beside them), the map's player heads from CreateRegionMapPlayerIcon's pools
+# (0x081A3A0C.. : Brendan's {gfx, pal} first, then May's).
+RECHARGED_EMERALD_ROM = GBA_DIR + "Pokemon Recharged Emerald (v2.2.8).gba"
+
+
+def recharged_emerald_symbols(rom):
+    return {"PartyBgGfx": (0x624B70, 0), "PartyBgPal": (0x624F0C, 0), "PartyBgMap": (0x624FF8, 0),
+            "StatusGfx": (0x625540, 0), "StatusPal": (0x625738, 0),
+            "FontSmall": (0x859644, 0x4000),
+            "RegionGfx": (0x9110CC, 0), "RegionMap": (0x911C4C, 0), "RegionPal": (0x91108C, 0x40),
+            "BrendanGfx": (0x911FF0, 0x80), "BrendanPal": (0x911FD0, 0x20), "MayGfx": (0x912090, 0x80), "MayPal": (0x912070, 0x20)}
+# Pokémon Recharged Yellow v1.8.0 (sha1 be503359...): its TRAINER CARD is FireRed's art byte for byte (the FR_CARD_*
+# rows find it) under card code of its own, with its own player pics (trainer pics 135 / 136, LZ77) and its own copy of
+# FONT_NORMAL (8 glyphs redrawn). Only the font's first 0x118 glyphs (and widths) are fingerprinted: every character the
+# card prints is below that, and v1.9.4 added glyphs past it - so one row finds it in all four releases.
+RECHARGED_YELLOW_ROM = first_rom("Pokemon Recharged Yellow (v1.8.0).gba")
+
+
+def recharged_yellow_symbols(rom):
+    return {"PicMale": (0x545754, 0), "PicMalePal": (0x545A70, 0), "PicFemale": (0x545A98, 0), "PicFemalePal": (0x545DA8, 0),
+            "FontNormal": (0x7CBF84, 0x118 * 64), "FontNormalWidths": (0x7D3F84, 0x118)}
 
 
 def glazed_symbols(rom):
@@ -393,6 +442,19 @@ GAMES = {
         ("LZ_REGION_GFX", "RegionGfx", True),
         ("LZ_REGION_PAL", "RegionPal", False),
         ("LZ_REGION_MAP", "RegionMap", True),
+        ("LZ_CARD_GFX", "CardGfx", True),
+        ("LZ_CARD_FRONT", "CardFront", True),
+        ("LZ_CARD_BACK", "CardBack", True),
+        ("LZ_CARD_PAL0", "CardPal0", False),
+        ("LZ_CARD_PAL1", "CardPal1", False),
+        ("LZ_CARD_BADGES_PAL", "BadgesPal", False),
+        ("LZ_CARD_BADGES_GFX", "BadgesGfx", True),
+        ("LZ_PIC_MALE", "PicMale", True),
+        ("LZ_PIC_MALE_PAL", "PicMalePal", True),
+        ("LZ_PIC_FEMALE", "PicFemale", True),
+        ("LZ_PIC_FEMALE_PAL", "PicFemalePal", True),
+        ("LZ_FONT_NORMAL", "FontNormal", False),
+        ("LZ_FONT_NORMAL_WIDTHS", "FontNormalWidths", False),
     ]),
     "SGL": (SEAGLASS_ROM, None, [
         ("SGL_REGION_GFX", "RegionGfx", True),
@@ -447,12 +509,41 @@ GAMES = {
         ("GZ_PIC_FEMALE_PAL", "PicFemalePal", True),
         ("GZ_FONT_NORMAL", "FontNormal", False),
     ]),
+    # Pokémon Emerald Legacy v1.1.4: its source built with agbcc (= the release, byte for byte), so its ELF names the
+    # one card blob retail doesn't have - the black card for a fifth star (catching MEW), sHoennTrainerCardBlack_Pal.
+    # Every other card / party / map blob is retail Emerald's, byte for byte.
+    "LG": ("pokelegacy/pokeemerald.gba", "pokelegacy/pokeemerald.elf", [
+        ("LG_CARD_PAL5", "sHoennTrainerCardBlack_Pal", False),
+    ]),
+    "RY": (RECHARGED_YELLOW_ROM, None, [
+        ("RY_PIC_MALE", "PicMale", True),
+        ("RY_PIC_MALE_PAL", "PicMalePal", True),
+        ("RY_PIC_FEMALE", "PicFemale", True),
+        ("RY_PIC_FEMALE_PAL", "PicFemalePal", True),
+        ("RY_FONT_NORMAL", "FontNormal", False),
+        ("RY_FONT_NORMAL_WIDTHS", "FontNormalWidths", False),
+    ]),
     "MM": (MARIOMON_ROM, None, [
         ("MM_REGION_GFX", "RegionGfx", True),
         ("MM_REGION_PAL", "RegionPal", False),
         ("MM_REGION_MAP", "RegionMap", True),
         ("MM_PLAYER_MARIO_GFX", "PlayerGfx", False),
         ("MM_PLAYER_MARIO_PAL", "PlayerPal", False),
+    ]),
+    "RE": (RECHARGED_EMERALD_ROM, None, [
+        ("RE_PARTY_BG_GFX", "PartyBgGfx", True),
+        ("RE_PARTY_BG_PAL", "PartyBgPal", True),
+        ("RE_PARTY_BG_MAP", "PartyBgMap", True),
+        ("RE_STATUS_GFX", "StatusGfx", True),
+        ("RE_STATUS_PAL", "StatusPal", True),
+        ("RE_FONT_SMALL", "FontSmall", False),
+        ("RE_REGION_GFX", "RegionGfx", True),
+        ("RE_REGION_MAP", "RegionMap", True),
+        ("RE_REGION_PAL", "RegionPal", False),
+        ("RE_PLAYER_BRENDAN_GFX", "BrendanGfx", False),
+        ("RE_PLAYER_BRENDAN_PAL", "BrendanPal", False),
+        ("RE_PLAYER_MAY_GFX", "MayGfx", False),
+        ("RE_PLAYER_MAY_PAL", "MayPal", False),
     ]),
     "SG": (SOULGOLD_ROM, None, [
         ("SG_BAG_STARS_GFX", "BagStarsGfx", "smol"),
@@ -461,6 +552,24 @@ GAMES = {
         ("SG_REGION_GFX", "RegionGfx", "smol"),
         ("SG_REGION_MAP", "RegionMap", "smol"),
         ("SG_REGION_PAL", "RegionPal", False),
+        ("SG_CARD_GFX", "CardGfx", "smol"),
+        ("SG_CARD_FRONT", "CardFront", "smol"),
+        ("SG_CARD_BACK", "CardBack", "smol"),
+        ("SG_CARD_BG", "CardBg", "smol"),
+        ("SG_CARD_PAL0", "CardPal0", False),
+        ("SG_CARD_PAL1", "CardPal1", False),
+        ("SG_CARD_PAL2", "CardPal2", False),
+        ("SG_CARD_PAL3", "CardPal3", False),
+        ("SG_CARD_PAL4", "CardPal4", False),
+        ("SG_CARD_FEMALE_PAL", "CardFemalePal", False),
+        ("SG_CARD_BADGES_PAL", "BadgesPal", False),
+        ("SG_CARD_BADGES_GFX", "BadgesGfx", "smol"),
+        ("SG_PIC_MALE", "PicMale", "smol"),
+        ("SG_PIC_MALE_PAL", "PicMalePal", False),
+        ("SG_PIC_FEMALE", "PicFemale", "smol"),
+        ("SG_PIC_FEMALE_PAL", "PicFemalePal", False),
+        ("SG_FONT_NORMAL", "FontNormal", False),
+        ("SG_FONT_NORMAL_WIDTHS", "FontNormalWidths", False),
     ]),
 }
 
@@ -504,8 +613,8 @@ def fireRed_symbols(p):
 
 
 # The binary hacks' made-up symbols (no ELF).
-ROM_SYMBOLS = {"UB": unbound_symbols, "RR": cfru_symbols, "OD": cfru_symbols, "AM": cfru_symbols, "SS": cfru_symbols, "LZ": lazarus_symbols, "SGL": seaglass_symbols, "SG": soulgold_symbols,
-               "GZ": glazed_symbols, "IMP": imperium_symbols, "QTZ": quetzal_symbols, "HNS": hns_symbols, "RW": rowe_symbols, "MM": mariomon_symbols,
+ROM_SYMBOLS = {"RY": recharged_yellow_symbols, "UB": unbound_symbols, "RR": cfru_symbols, "OD": cfru_symbols, "AM": cfru_symbols, "SS": cfru_symbols, "LZ": lazarus_symbols, "SGL": seaglass_symbols, "SG": soulgold_symbols,
+               "GZ": glazed_symbols, "IMP": imperium_symbols, "QTZ": quetzal_symbols, "HNS": hns_symbols, "RW": rowe_symbols, "MM": mariomon_symbols, "RE": recharged_emerald_symbols,
                **{"EM" + lang: emerald_eu_symbols(lang) for lang in EMERALD_EU_ROMS},
                **{"FR" + lang: fireRed_symbols(p) for lang, p in fireRed_ports().items()}}
 
@@ -564,7 +673,12 @@ def main():
                 if w is not None:
                     break
             else:
-                raise SystemExit(f"{name}: no unique window")
+                # No window of its own (Recharged Emerald keeps two FONT_SMALLs a glyph apart): one a few copies
+                # share - RomArt checks each hit's CRC and scans on, so the other copy is passed over.
+                w = next((w for w in range(0, raw_len - 15, 2) if len(set(rom[off + w:off + w + 16])) >= 6
+                          and rom.count(rom[off + w:off + w + 16]) <= copies + 2), None)
+                if w is None:
+                    raise SystemExit(f"{name}: no unique window")
             win = rom[off + w:off + w + 16]
             h = head(win)
             h = h - (1 << 64) if h >= 1 << 63 else h

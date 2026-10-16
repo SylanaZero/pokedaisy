@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
@@ -56,6 +57,7 @@ import com.pokedaisy.app.companion.BattleInput
 import com.pokedaisy.app.companion.StateSlots
 import com.pokedaisy.app.companion.data.BATTLE_INPUT_ACTION_SELECT
 import com.pokedaisy.app.companion.data.CardStyle
+import com.pokedaisy.app.companion.data.isGameBoyGame
 import com.pokedaisy.app.companion.data.TrainerCardArt
 import com.pokedaisy.app.companion.data.TrainerCardInfo
 import com.pokedaisy.app.companion.data.BATTLE_INPUT_MOVE_SELECT
@@ -150,16 +152,46 @@ class FakeSettings(showHintsInitially: Boolean = true, initialTabs: List<String>
     override fun setFfMode(mode: com.pokedaisy.app.companion.FfMode) { ffModeValue = mode }
     override val touchControlsMode get() = touch
     override fun setTouchControlsMode(v: Int) { touch = v }
+    // SCENE SPEEDS: battles at 2x, the rest SAME; AUTO-RUN on (the preview's game is one the field reads know).
+    private var sceneBattle = 2f
+    private var sceneText = 0f
+    private var sceneMenu = 0f
+    override val battleSpeed get() = sceneBattle
+    override fun setBattleSpeed(v: Float) { sceneBattle = v }
+    override val textSpeed get() = sceneText
+    override fun setTextSpeed(v: Float) { sceneText = v }
+    override val menuSpeed get() = sceneMenu
+    private var sceneBike = 3f
+    private var sceneSurf = 0f
+    override val bikeSpeed get() = sceneBike
+    override fun setBikeSpeed(v: Float) { sceneBike = v }
+    override val surfSpeed get() = sceneSurf
+    override fun setSurfSpeed(v: Float) { sceneSurf = v }
+    override val fieldMovesReadable get() = true
+    override fun setMenuSpeed(v: Float) { sceneMenu = v }
+    override val fieldReadable get() = true
+    private var autoRunOn = true
+    override val autoRun get() = autoRunOn
+    override fun setAutoRun(on: Boolean) { autoRunOn = on }
+    private var runIndoorsOn = false
+    override val runIndoors get() = runIndoorsOn
+    override fun setRunIndoors(on: Boolean) { runIndoorsOn = on }
+    override val runIndoorsSupported get() = true
+    private var wildPercent = 50
+    override val wildEncounters get() = wildPercent
+    override fun setWildEncounters(percent: Int) { wildPercent = percent }
+    override val wildEncountersSupported get() = true
     override fun gbaControlBindings() = GbaControls.Btn.entries.associateWith {
         listOf(when (it) { GbaControls.Btn.START2 -> "BUTTON_X"; GbaControls.Btn.SELECT2 -> "BUTTON_Y"; else -> "BUTTON_${it.name}" })
     }
     override fun setGbaControlBinding(btn: GbaControls.Btn, keyName: String) {}
+    override val keyCapture get() = previewCapture
     private var hotkeysOn = true
     override val hotkeysEnabled get() = hotkeysOn
     override fun setHotkeysEnabled(on: Boolean) { hotkeysOn = on }
     // SAVE STATE on X, so picking X elsewhere shows the KEY IN USE confirm.
     override fun hotkeyBindings() = Hotkeys.Action.entries.associateWith { if (it == Hotkeys.Action.SAVE_STATE) listOf("BUTTON_X") else listOf("BUTTON_Y") }
-    override fun setHotkeyBinding(action: Hotkeys.Action, keyName: String?, takeFrom: List<Hotkeys.Action>) {}
+    override fun setHotkeyBinding(action: Hotkeys.Action, keyNames: List<String>?, takeFrom: List<Hotkeys.Action>) {}
     override fun restartGame() {}
     override fun closeGame() {}
     override val canCloseCompanion = true   // the Thor: two screens, so SETTINGS shows CLOSE COMPANION
@@ -271,6 +303,18 @@ class Shot(
     val action: SkikoComposeUiTest.() -> Unit = {},
 )
 
+/** The companion's rebind capture (FakeSettings hands it out): the `*-capture` shots press keys into it. */
+var previewCapture = com.pokedaisy.app.companion.KeyCapture()
+
+/** Holds [keys] down in [previewCapture] (as the game's activity would pass them on); [release] lets them go. */
+fun SkikoComposeUiTest.pressKeys(vararg keys: Int, release: Boolean = false) {
+    runOnIdle {
+        keys.forEach { previewCapture.onKey(it, true) }
+        if (release) keys.forEach { previewCapture.onKey(it, false) }
+    }
+    waitForIdle()
+}
+
 /** The device's BACK for the shot being rendered; the `*-back` shots press it. */
 var previewBack = com.pokedaisy.app.companion.ui.CompanionBack()
 
@@ -297,6 +341,7 @@ fun companion(
     settingsRow: String? = null,
     snap: () -> SnapshotView = ::snapshot,
 ): () -> (@Composable () -> Unit) = {
+    previewCapture = com.pokedaisy.app.companion.KeyCapture()
     DeviceBattery.status.value = battery
     val sv = snap()
     val back = com.pokedaisy.app.companion.ui.CompanionBack().also { previewBack = it }
@@ -316,6 +361,10 @@ fun companion(
  */
 class PreviewItemUse(private val party: List<MonView>, private val bagFull: Boolean = false) : com.pokedaisy.app.companion.ItemUse {
     override fun canTake() = true
+    // PC anywhere: the button shows; a tap answers "not now" (a menu open), as the BAG pops it up.
+    override fun canPc() = true
+    override fun openPc(done: (com.pokedaisy.app.companion.data.ItemUseOutcome) -> Unit) =
+        done(com.pokedaisy.app.companion.data.ItemUseOutcome(com.pokedaisy.app.companion.data.ItemUseResult.NOT_NOW))
     // TAKE's answer: the QUICK CLAW can come off, or ([bagFull]) the bag has no room for it.
     override fun heldItems(done: (com.pokedaisy.app.companion.data.PartyTargets) -> Unit) = done(com.pokedaisy.app.companion.data.PartyTargets(
         com.pokedaisy.app.companion.data.ItemUseResult.USED,
@@ -475,7 +524,8 @@ class RamFixture(dir: File) : MemoryReader {
 fun liveGuide(): ((SnapshotView) -> SnapshotView)? {
     val path = System.getProperty("rom").orEmpty()
     val (cfg, fixture) = when (activeGame) {
-        GameKind.EMERALD -> NATIVE_EMERALD_RETAIL to "emerald_vanilla"
+        GameKind.EMERALD -> if (com.pokedaisy.app.companion.data.emeraldLegacy) com.pokedaisy.app.companion.data.NATIVE_EMERALD_LEGACY to "emerald_legacy"
+            else NATIVE_EMERALD_RETAIL to "emerald_vanilla"
         GameKind.FIRERED -> NATIVE_FIRERED_REV1 to "firered_vanilla"
         else -> return null
     }
@@ -503,7 +553,11 @@ fun liveGuide(): ((SnapshotView) -> SnapshotView)? {
  */
 fun dexShots(game: GameKind, live: ((SnapshotView) -> SnapshotView)?, w: Int, h: Int, d: Float): List<Shot> {
     if (live == null) return emptyList()
-    val (cfg, fixture) = if (game == GameKind.EMERALD) NATIVE_EMERALD_RETAIL to "emerald_vanilla" else NATIVE_FIRERED_REV1 to "firered_vanilla"
+    val (cfg, fixture) = when {
+        game == GameKind.EMERALD && com.pokedaisy.app.companion.data.emeraldLegacy -> com.pokedaisy.app.companion.data.NATIVE_EMERALD_LEGACY to "emerald_legacy"
+        game == GameKind.EMERALD -> NATIVE_EMERALD_RETAIL to "emerald_vanilla"
+        else -> NATIVE_FIRERED_REV1 to "firered_vanilla"
+    }
     val dex = com.pokedaisy.app.companion.data.readPokedexState(RamFixture(File("../../test/resources/fixtures/$fixture")), cfg, cfg.pokedex!!)
         ?: return emptyList()
     val g = game.name.lowercase()
@@ -601,7 +655,7 @@ fun withCheats(seeded: Boolean = true, make: () -> SettingsActivity): androidx.a
 fun withHidden(make: () -> androidx.activity.ComponentActivity): androidx.activity.ComponentActivity {
     val ctx = android.content.Context()
     val roms = File(ctx.filesDir, "roms")
-    Prefs(ctx).hiddenRoms = setOf(File(roms, "Pokemon - Gaia (v3.2).gba").absolutePath, File(roms, "1636 - Pokemon Radical Red.gba").absolutePath)
+    Prefs(ctx).hiddenRoms = setOf(File(roms, "Pokemon Gaia (v3.2).gba").absolutePath, File(roms, "1636 - Pokemon Radical Red.gba").absolutePath)
     return make()
 }
 
@@ -613,7 +667,7 @@ fun datedLibrary() {
     val now = System.currentTimeMillis()
     val hour = 3_600_000L
     val roms = File(ctx.filesDir, "roms").listFiles().orEmpty().filter { it.isFile }
-    val fresh = mapOf("Pokemon - Gaia (v3.2).gba" to now - hour, "Pokemon Lazarus (v2.0).gba" to now - 36 * hour, "Pokemon - Unbound (v2.1.1.1).gba" to now)
+    val fresh = mapOf("Pokemon Gaia (v3.2).gba" to now - hour, "Pokemon Lazarus (v2.0).gba" to now - 36 * hour, "Pokemon Unbound (v2.1.1.1).gba" to now)
     File(ctx.filesDir, "rom-added.tsv").writeText(roms.joinToString("") { f ->
         val at = fresh[f.name]
         "${f.absolutePath}\t${at ?: now - 7 * 24 * hour}\t${if (at == null) 1 else 0}\n"
@@ -661,8 +715,8 @@ fun activity(expandIntro: Boolean = false, start: Boolean = false, make: () -> a
     val roms = File(ctx.filesDir, "roms").apply { mkdirs() }
     // Dump-style file names, as players have them; firered-hack stays unrecognised (a hack it doesn't know).
     val names = listOf(
-        "firered-hack.gba", "Pokemon - Unbound (v2.1.1.1).gba", "Pokemon - Emerald Version (USA, Europe).gba",
-        "1636 - Pokemon Radical Red.gba", "Pokemon - Gaia (v3.2).gba", "Pokemon Emerald Imperium (World) (v1.3.1).gba",
+        "firered-hack.gba", "Pokemon Unbound (v2.1.1.1).gba", "Pokemon - Emerald Version (USA, Europe).gba",
+        "1636 - Pokemon Radical Red.gba", "Pokemon Gaia (v3.2).gba", "Pokemon Emerald Imperium (v1.3.1).gba",
     )
     roms.listFiles()?.forEach { it.delete() }
     names.forEach { File(roms, it).apply { writeText("x"); setLastModified(1_700_000_000_000L) } }
@@ -744,9 +798,9 @@ fun fakeMedia(ctx: android.content.Context) {
     val real = System.getProperty("ssMedia").orEmpty().takeIf { it.isNotBlank() }?.let(::File)
     if (real != null) {
         mapOf(
-            "firered-hack.gba" to "Pokémon FireRed", "Pokemon - Unbound (v2.1.1.1).gba" to "Pokémon Unbound",
+            "firered-hack.gba" to "Pokémon FireRed", "Pokemon Unbound (v2.1.1.1).gba" to "Pokémon Unbound",
             "Pokemon - Emerald Version (USA, Europe).gba" to "Pokémon Emerald", "1636 - Pokemon Radical Red.gba" to "Pokémon Radical Red",
-            "Pokemon - Gaia (v3.2).gba" to "Pokémon Gaia", "Pokemon Emerald Imperium (World) (v1.3.1).gba" to "Pokémon Emerald Imperium",
+            "Pokemon Gaia (v3.2).gba" to "Pokémon Gaia", "Pokemon Emerald Imperium (v1.3.1).gba" to "Pokémon Emerald Imperium",
         ).forEach { (rom, title) -> File(real, title).takeIf { it.isDirectory }?.copyRecursively(File(root, rom), overwrite = true) }
         return
     }
@@ -760,7 +814,7 @@ fun fakeMedia(ctx: android.content.Context) {
     }
     listOf(
         Triple("firered-hack.gba", java.awt.Color(0xD8, 0x50, 0x30), "Preview Quest Red"),
-        Triple("Pokemon - Unbound (v2.1.1.1).gba", java.awt.Color(0x60, 0x40, 0xB0), "Preview Quest Violet"),
+        Triple("Pokemon Unbound (v2.1.1.1).gba", java.awt.Color(0x60, 0x40, 0xB0), "Preview Quest Violet"),
     ).forEach { (rom, tint, name) ->
         val dir = File(root, rom)
         png(File(dir, "box.img"), 480, 480) { g ->
@@ -869,6 +923,8 @@ fun main(args: Array<String>) {
     val only = args.getOrElse(1) { "" }.split(",").filter { it.isNotBlank() }
     val game = GameKind.valueOf(System.getProperty("game") ?: "FIRERED")
     activeGame = game
+    // -PgameText=EMERALD_LEGACY: Emerald Legacy runs as EMERALD under its own text key (its names, config, fixture).
+    System.getProperty("gameText").orEmpty().takeIf { it.isNotBlank() }?.let { com.pokedaisy.app.companion.data.romGameCode = it }
     // -Plang=FR: the app's text in another language (saved like the LANGUAGE setting, which the activities re-apply).
     System.getProperty("lang").orEmpty().takeIf { it.isNotBlank() }?.let { code ->
         runCatching { com.pokedaisy.app.Prefs(android.content.Context()).appLanguage = code }
@@ -877,6 +933,8 @@ fun main(args: Array<String>) {
     // -Pdark=true: DARK MODE on for every shot.
     if (System.getProperty("dark") == "true") com.pokedaisy.app.companion.ui.theme.DarkMode.override = true
     val g = game.name.lowercase()
+    // The battle menu's POKéMON button: PkMn on the Game Boy games (drawn twice there, bold: the first copy is tapped).
+    val pokemonButton = if (game.isGameBoyGame) "PkMn" else "POKéMON"
     val live = liveGuide()
     // AYN Thor: bottom screen 1240x1080 (landscape), top screen 1920x1080.
     // -PcompanionW / -PcompanionH: a single-screen device's side panel instead, at its density.
@@ -938,6 +996,14 @@ fun main(args: Array<String>) {
         *(if (game == GameKind.FIRERED) arrayOf(
             Shot("$g-map-region", bw, bh, bd, companion("MAP")) { onNodeWithText("SEVII", substring = true).performClick() },
         ) else emptyArray()),
+        // R.O.W.E.'s three maps (its region button reads MAP 2 / MAP 3): the buttons' bottom-left row on each.
+        *(if (game == GameKind.ROWE) arrayOf(
+            Shot("$g-map-region", bw, bh, bd, companion("MAP")) { onNodeWithText("MAP ", substring = true).performClick() },
+            Shot("$g-map-region2", bw, bh, bd, companion("MAP")) {
+                onNodeWithText("MAP ", substring = true).performClick()
+                onNodeWithText("MAP ", substring = true).performClick()
+            },
+        ) else emptyArray()),
         *(if (game == GameKind.FIRERED || game == GameKind.EMERALD) arrayOf(
             Shot("$g-map-pick", bw, bh, bd, companion("MAP")) {
                 onNodeWithText("PLACES").performClick()
@@ -964,12 +1030,14 @@ fun main(args: Array<String>) {
             pressBack()
             onAllNodesWithText("SAVE STATE").assertCountEquals(0)
         },
-        Shot("$g-back-settings-hotkeys-picker", bw, bh, bd, companion("SETTINGS")) {
+        // The device's BACK while a hotkey waits for keys reaches the capture first (the game's activity): it stops
+        // waiting, the page stays.
+        Shot("$g-back-settings-hotkeys-capture", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("SAVE STATE").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-            onAllNodesWithText("BIND SAVE STATE").onFirst().assertExists()
-            pressBack()
-            onAllNodesWithText("BIND SAVE STATE").assertCountEquals(0) // the picker closed...
+            onAllNodesWithText("PRESS KEYS…").onFirst().assertExists()
+            pressKeys(android.view.KeyEvent.KEYCODE_BACK)
+            onAllNodesWithText("PRESS KEYS…").assertCountEquals(0) // no longer waiting...
             onAllNodesWithText("SAVE STATE").onFirst().assertExists() // ...still on HOTKEYS
         },
         Shot("$g-back-settings-states", bw, bh, bd, companion("SETTINGS")) {
@@ -990,7 +1058,7 @@ fun main(args: Array<String>) {
         Shot("$g-battle-onetap", bw, bh, bd, companion("PARTY", oneTap = true) { battle(BATTLE_INPUT_ACTION_SELECT) }),
         // The POKéMON pane: from the action menu, and over the game's own party menu.
         Shot("$g-battle-switch", bw, bh, bd, companion("PARTY") { battle(BATTLE_INPUT_ACTION_SELECT) }) {
-            onNodeWithText("POKéMON").performClick()
+            onAllNodesWithText(pokemonButton)[0].performClick()
         },
         // A fuller party against Onix: BEST on the pick, OUT on the lead, a fainted Pidgey.
         Shot("$g-battle-switch-trainer", bw, bh, bd, companion("PARTY") {
@@ -998,7 +1066,7 @@ fun main(args: Array<String>) {
                 s.copy(party = s.party.mapIndexed { i, m -> m.copy(personality = 0x1000L + i, hp = if (i == 1) 0 else m.hp) })
             }
         }) {
-            onNodeWithText("POKéMON").performClick()
+            onAllNodesWithText(pokemonButton)[0].performClick()
         },
         Shot("$g-battle-party-open", bw, bh, bd, companion("PARTY") { battle(BATTLE_INPUT_PARTY_OPEN) }),
         Shot("$g-battle-busy", bw, bh, bd, companion("PARTY", busy = true) { battle(BATTLE_INPUT_ACTION_SELECT) }),
@@ -1053,6 +1121,10 @@ fun main(args: Array<String>) {
         },
         // USE / GIVE (FieldItems.kt): the row marks (the Potion and the Poké Ball; Oak's Parcel has none)...
         Shot("$g-items-marks", bw, bh, bd, companion("ITEMS", items = true)),
+        // PC anywhere: the PC button over the sort button, then its "not now" popped up over the bag.
+        Shot("$g-items-pc", bw, bh, bd, companion("ITEMS", items = true)) {
+            onNodeWithText("PC").performClick()
+        },
         // ...beside a star, on the FAVORITES tab (Potion starred, as is Oak's Parcel, which gets no mark)...
         Shot("$g-items-marks-favorites", bw, bh, bd, companion("ITEMS", items = true)) {
             for (name in listOf("Potion", "Parcel")) {
@@ -1089,13 +1161,18 @@ fun main(args: Array<String>) {
         Shot("$g-settings-ffspeed", bw, bh, bd, companion("SETTINGS")) { onNodeWithText("FF SPEED").performClick() },
         // GAME BUTTONS' subtitle, further down the list.
         Shot("$g-settings-subtitles", bw, bh, bd, companion("SETTINGS")) { onNodeWithText("TWEAKS").performScrollTo() },
-        Shot("$g-settings-ffmusic", bw, bh, bd, companion("SETTINGS")) { onAllNodesWithText("FF MUSIC").onFirst().performClick() },
+        Shot("$g-settings-ffmusic", bw, bh, bd, companion("SETTINGS")) { onNodeWithText("SPEED OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onAllNodesWithText("FF MUSIC").onFirst().performScrollTo().performClick() },
         // ASPECT's pick-list: WIDE tagged NOT YET (the preview's settings know no game).
         Shot("$g-settings-aspect", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("ASPECT").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("$g-settings-hotkeys", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        // The list's end: RESTART GAME / CLOSE APP with their NEW tags, no keys.
+        Shot("$g-settings-hotkeys-end", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("CLOSE APP").performScrollTo()
         },
         Shot("$g-settings-buttons", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("GAME BUTTONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
@@ -1105,16 +1182,22 @@ fun main(args: Array<String>) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("ON").performClick()
         },
-        // The key picker: NONE (unbind) above CANCEL.
-        Shot("$g-settings-hotkeys-picker", bw, bh, bd, companion("SETTINGS")) {
+        // A hotkey waiting for keys (the game's screen asks for them): SELECT held, R1 on its way - CLEAR / CANCEL above.
+        Shot("$g-settings-hotkeys-capture", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("LOAD STATE").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            pressKeys(android.view.KeyEvent.KEYCODE_BUTTON_SELECT, android.view.KeyEvent.KEYCODE_BUTTON_R1)
         },
-        // X is SAVE STATE's: binding it to LOAD STATE asks first (the picker's X is the last "X" in the tree).
+        // A GBA button waiting for its button: CANCEL alone (A always keeps a key).
+        Shot("$g-settings-buttons-capture", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("GAME BUTTONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("GBA A").performSemanticsAction(SemanticsActions.OnClick)
+        },
+        // X is SAVE STATE's: binding it to LOAD STATE asks first.
         Shot("$g-settings-hotkeys-clash", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("LOAD STATE").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-            onAllNodesWithText("X").onLast().performSemanticsAction(SemanticsActions.OnClick)
+            pressKeys(android.view.KeyEvent.KEYCODE_BUTTON_X, release = true)
             onAllNodesWithText("KEY IN USE").onFirst().assertExists()
         },
         // CLOSE GAME / RESTART GAME end the scrolling list.
@@ -1126,21 +1209,40 @@ fun main(args: Array<String>) {
         Shot("$g-settings-companion", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("ONE-TAP MOVES").performScrollTo()
         },
+        // GAMEPLAY: WILD ENCOUNTERS, AUTO-RUN, RUN INDOORS, CHEATS, then WILD ENCOUNTERS flipped OFF.
+        Shot("$g-settings-controls", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("WILD ENCOUNTERS").performScrollTo()
+        },
+        Shot("$g-settings-wild", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("WILD ENCOUNTERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        // DISPLAY OPTIONS: STATUS BAR, SHADERS, OVERLAY.
+        Shot("$g-settings-display", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        // SPEED OPTIONS: SCENE SPEEDS (BATTLE / TEXT / MENU SPEED...) over FF MODE / FF MUSIC, then BATTLE SPEED's pick-list.
+        Shot("$g-settings-scenes", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("SPEED OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        Shot("$g-settings-scenes-battle", bw, bh, bd, companion("SETTINGS")) {
+            onNodeWithText("SPEED OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("BATTLE SPEED").performClick()
+        },
         // TWEAKS: the small on / off preferences.
         Shot("$g-settings-tweaks", bw, bh, bd, companion("SETTINGS")) {
             onNodeWithText("TWEAKS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         // SHADERS: its page (FILTER, GBA COLORS), then after one FILTER tap (it cycles: NONE -> LCD).
         Shot("$g-settings-shaders", bw, bh, bd, companion("SETTINGS")) {
-            onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("$g-settings-shaders-filter", bw, bh, bd, companion("SETTINGS")) {
-            onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("FILTER").performClick()
         },
         // OVERLAY: its pick-list (NONE, the built-in frames, an import).
         Shot("$g-settings-overlay", bw, bh, bd, companion("SETTINGS")) {
-            onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("$g-settings-cheats", bw, bh, bd, companion("SETTINGS")) { onNodeWithText("CHEATS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick) },
         Shot("$g-settings-tabs", bw, bh, bd, companion("SETTINGS")) { onNodeWithText("TAB BAR").performScrollTo().performSemanticsAction(SemanticsActions.OnClick) },
@@ -1304,6 +1406,16 @@ fun main(args: Array<String>) {
         Shot("trade-swap", tw, th, td, trade { selA = BoxSlot(0, 0); selB = BoxSlot(0, 0) }),
         Shot("trade-phone", 1080, 2400, 2.625f, trade { selA = BoxSlot(0, 0); selB = BoxSlot(0, 0) }),
         Shot("library-expand-intro", tw, th, td, activity(expandIntro = true) { LibraryActivity() }),
+        // A phone held upright (a Galaxy S9's 1080x2220 at 3x): the smaller text, the picture over the words, the buttons on screen.
+        Shot("library-expand-intro-phone", 1080, 2220, 3f, activity(expandIntro = true) { LibraryActivity() }),
+        Shot("settings-phone", 1080, 2220, 3f, activity { SettingsActivity() }),
+        // The top screen's SPEED OPTIONS (FF MODE, FF MUSIC) and DISPLAY OPTIONS (STATUS BAR, SHADERS, OVERLAY).
+        Shot("settings-speed", tw, th, td, activity { SettingsActivity() }) {
+            onNodeWithText("SPEED OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        Shot("settings-display", tw, th, td, activity { SettingsActivity() }) {
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
         // A ROM imported with "add anyway?": the library tags what the second screen can't read.
         Shot("library-tag-unsupported", tw, th * 2, td, activity {
             val ctx = android.content.Context()
@@ -1311,7 +1423,7 @@ fun main(args: Array<String>) {
             File(ctx.filesDir, "rom-folder-scan.tsv").writeText("$hack\t1\t1700000000000\t0\n")
             LibraryActivity().apply {
                 unsupportedRoms = setOf(hack)
-                partialRoms = setOf(File(ctx.filesDir, "roms/Pokemon - Gaia (v3.2).gba").absolutePath)
+                partialRoms = setOf(File(ctx.filesDir, "roms/Pokemon Gaia (v3.2).gba").absolutePath)
             }
         }),
         Shot("library-tag-unsupported-grid", tw, th * 2, td, activity {
@@ -1481,9 +1593,43 @@ fun main(args: Array<String>) {
             LibraryActivity().apply {
                 setup = SetupState().apply {
                     step = SetupState.Step.BUTTONS
-                    buttons = listOf("A" to "A / Z", "B" to "B / X", "L" to "L1 / A", "R" to "R1 / S", "START" to "START / ENTER", "SELECT" to "SELECT", "TURBO A" to "")
+                    buttons = PREVIEW_BUTTONS
                 }
             }
+        }),
+        // A row waiting for its button, in place: what to do and CANCEL under it.
+        Shot("setup-buttons-capture", tw, th, td, activity {
+            LibraryActivity().apply {
+                setup = SetupState().apply {
+                    step = SetupState.Step.BUTTONS
+                    buttons = PREVIEW_BUTTONS
+                    capture.start(com.pokedaisy.app.companion.KeyCapture.Request("GBA B", chord = false, onDone = {}))
+                }
+            }
+        }),
+        // TURBO A can go back to unbound: CLEAR beside CANCEL.
+        Shot("setup-buttons-capture-turbo", tw, th, td, activity {
+            LibraryActivity().apply { setup = SetupState().apply { step = SetupState.Step.BUTTONS; buttons = PREVIEW_BUTTONS } }
+        }) { onNodeWithText("GBA TURBO A").performScrollTo().performSemanticsAction(SemanticsActions.OnClick) },
+        // A row at the window's bottom edge, tapped: its CANCEL line scrolls up into view.
+        Shot("setup-buttons-capture-low", tw, th, td, activity {
+            LibraryActivity().apply { setup = SetupState().apply { step = SetupState.Step.BUTTONS; buttons = PREVIEW_BUTTONS } }
+        }) { onNodeWithText("GBA R").performSemanticsAction(SemanticsActions.OnClick) },
+        // Over the game while the companion waits for keys: GBA A first, then a hotkey with SELECT held.
+        Shot("game-capture-button", th * 3 / 2, th, td, {
+            previewCapture = com.pokedaisy.app.companion.KeyCapture().apply {
+                start(com.pokedaisy.app.companion.KeyCapture.Request("GBA A", chord = false, onDone = {}))
+            }
+            val capture = previewCapture
+            ({ PreviewGame { com.pokedaisy.app.companion.ui.KeyCapturePopup(capture) } })
+        }),
+        Shot("game-capture-hotkey", th * 3 / 2, th, td, {
+            previewCapture = com.pokedaisy.app.companion.KeyCapture().apply {
+                start(com.pokedaisy.app.companion.KeyCapture.Request("SAVE STATE", chord = true, onDone = {}, onClear = {}))
+                onKey(android.view.KeyEvent.KEYCODE_BUTTON_SELECT, true)
+            }
+            val capture = previewCapture
+            ({ PreviewGame { com.pokedaisy.app.companion.ui.KeyCapturePopup(capture) } })
         }),
         Shot("setup-media", tw, th, td, activity { withScreenScraper { LibraryActivity().apply { setup = SetupState().apply { step = SetupState.Step.MEDIA } } } }),
         Shot("setup-media-signed-in", tw, th, td, activity {
@@ -1532,24 +1678,24 @@ fun main(args: Array<String>) {
             onNodeWithText("AUTO ZOOM IN").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("settings-shaders", tw, th, td, activity { SettingsActivity() }) {
-            onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("settings-shaders-filter", tw, th, td, activity { SettingsActivity() }) {
-            onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("FILTER").performClick()
         },
         Shot("settings-swap", tw, th, td, activity { SettingsActivity() }) { onNodeWithText("SWAP SCREENS").performScrollTo() },
         // OVERLAY: its page with one import (DAISY picked), then REMOVE's mode.
         Shot("settings-overlay", tw, th, td, activity { withOverlays { SettingsActivity() } }) {
-            onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("settings-overlay-remove", tw, th, td, activity { withOverlays { SettingsActivity() } }) {
-            onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("REMOVE").performClick()
         },
         // REMOVE's mode > REMOVE ALL: the confirm.
         Shot("settings-overlay-remove-all", tw, th, td, activity { withOverlays { SettingsActivity() } }) {
-            onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("OVERLAY").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("REMOVE").performClick()
             onNodeWithText("REMOVE ALL").performClick()
         },
@@ -1575,9 +1721,18 @@ fun main(args: Array<String>) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onNodeWithText("SAVE STATE").performSemanticsAction(SemanticsActions.OnClick)
         },
+        Shot("settings-hotkeys-end", tw, th, td, activity { SettingsActivity() }) {
+            onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("CLOSE APP").performScrollTo()
+        },
         // The list's end: LIBRARY / ONLINE (RetroAchievements' BETA tag) / APP.
         Shot("settings-home-bottom", tw, th, td, activity { SettingsActivity() }) { onNodeWithText("RUN SETUP").performScrollTo() },
         Shot("settings-buttons", tw, th * 2, td, activity { SettingsActivity() }) { onNodeWithText("GAME BUTTONS").performScrollTo().performClick() },
+        // A GBA button waiting for its button, in place.
+        Shot("settings-buttons-capture", tw, th * 2, td, activity { SettingsActivity() }) {
+            onNodeWithText("GAME BUTTONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("GBA B").performSemanticsAction(SemanticsActions.OnClick)
+        },
         Shot("settings-hotkeys-off", tw, th, td, activity { SettingsActivity() }) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             onAllNodesWithText("ON").onFirst().performSemanticsAction(SemanticsActions.OnClick)
@@ -1749,4 +1904,23 @@ fun overlayView(
         }
     }
     content
+}
+
+/** The setup / Settings shots' bindings: the defaults, TURBO unbound. */
+val PREVIEW_BUTTONS: Map<GbaControls.Btn, List<String>> = GbaControls.Btn.entries.associateWith {
+    when (it) {
+        GbaControls.Btn.A -> listOf("BUTTON_A", "Z"); GbaControls.Btn.B -> listOf("BUTTON_B", "X")
+        GbaControls.Btn.L -> listOf("BUTTON_L1", "A"); GbaControls.Btn.R -> listOf("BUTTON_R1", "S")
+        GbaControls.Btn.START -> listOf("BUTTON_START", "ENTER"); GbaControls.Btn.SELECT -> listOf("BUTTON_SELECT")
+        GbaControls.Btn.START2 -> listOf("BUTTON_X"); GbaControls.Btn.SELECT2 -> listOf("BUTTON_Y")
+        GbaControls.Btn.TURBO_A, GbaControls.Btn.TURBO_B -> emptyList()
+    }
+}
+
+/** A stand-in game screen (no ROM art in the shots) for what's drawn over it. */
+@Composable
+fun PreviewGame(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(
+        androidx.compose.ui.Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF58A848)),
+    ) { content() }
 }

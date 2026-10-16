@@ -1,5 +1,6 @@
 package com.pokedaisy.app.companion.ui
 
+import androidx.compose.ui.graphics.RectangleShape
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -69,6 +70,7 @@ import com.pokedaisy.app.companion.i18n.tr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.floor
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 
 /** Which entries the list shows. SEEN = seen but not caught yet. [label] is English; OptionRows translates it. */
 enum class DexFilter(val label: String) { ALL(tk("ALL")), CAUGHT(tk("CAUGHT")), SEEN(tk("SEEN ONLY")), UNSEEN(tk("NOT SEEN")) }
@@ -85,6 +87,8 @@ class DexUiState(val list: LazyListState) {
     var national by mutableStateOf<Boolean?>(null)
     /** National dex number of the open entry; null = the list. */
     var open by mutableStateOf<Int?>(null)
+    /** The entry last opened: where the D-pad's cursor goes back to in the list (the companion's window). */
+    var lastOpened by mutableStateOf<Int?>(null)
     /** The entry page's section (INFO / EVOLVE / AREA / MOVES), kept while stepping through entries. */
     var section by mutableStateOf(DexSection.INFO)
 
@@ -204,9 +208,15 @@ fun PokedexScreen(dex: PokedexState, ui: DexUiState, modifier: Modifier = Modifi
                     GbaText(tr("NONE"), OptionColors.muted, OptionColors.mutedShadow, m)
                 }
             } else {
+                // The D-pad starts on the entry last opened while it's in the list, else on the top row showing.
+                val back = ui.lastOpened?.takeIf { it in entries }
+                val top = entries.getOrNull(ui.list.firstVisibleItemIndex)
                 LazyColumn(Modifier.fillMaxSize(), state = ui.list) {
                     items(entries, key = { it }) { n ->
-                        DexRow(order.number(n), species?.getOrNull(n) ?: 0, n in dex.caught, n in dex.seen, m, small) { ui.open = n }
+                        DexRow(
+                            order.number(n), species?.getOrNull(n) ?: 0, n in dex.caught, n in dex.seen, m, small,
+                            start = n == (back ?: top),
+                        ) { ui.lastOpened = n; ui.open = n }
                     }
                 }
             }
@@ -227,15 +237,22 @@ private fun CountLine(label: String, value: Int, small: GbaTextMetrics) {
 @Composable
 private fun DexRow(
     n: Int, species: Int, caught: Boolean, seen: Boolean,
-    m: GbaTextMetrics, small: GbaTextMetrics, onClick: () -> Unit,
+    m: GbaTextMetrics, small: GbaTextMetrics,
+    /** Where the D-pad starts in the list (the companion's window). */
+    start: Boolean = false,
+    onClick: () -> Unit,
 ) {
     val u = m.u
     val noRipple = remember { MutableInteractionSource() }
+    // The D-pad's row (the companion's window) turns white, the OPTION lists' cursor.
+    val focused by noRipple.collectIsFocusedAsState()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .focusStart(start)
             .fillMaxWidth()
             .height(u * 34)
+            .background(if (focused) OptionColors.rowSelected else Color.Transparent)
             .drawBehind { drawRowDivider(OptionColors.divider, u.toPx(), 4 * u.toPx()) }
             .soundClickable(interactionSource = noRipple, indication = null, onClick = onClick)
             .padding(horizontal = u * 4),
@@ -402,7 +419,9 @@ private fun EntryPage(
 @Composable
 private fun DexInfoSection(e: DexEntry?, small: GbaTextMetrics, m: GbaTextMetrics, modifier: Modifier) {
     val u = m.u
-    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(u * 2)) {
+    // Nothing to tap: one D-pad stop that scrolls (the companion's window).
+    val scroll = rememberScrollState()
+    Column(modifier.dpadScroll(scroll, RectangleShape, m.lineHeight * 3).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(u * 2)) {
         GbaText(e?.description ?: "", OptionColors.label, OptionColors.labelShadow, small, maxLines = 6)
         Separator(m, Modifier.fillMaxWidth())
         if (e != null) {
@@ -435,12 +454,15 @@ private val STAT_LABELS_GEN1 = listOf(tk("HP"), tk("ATTACK"), tk("DEFENSE"), tk(
 private fun BaseStats(stats: List<Int>, small: GbaTextMetrics) {
     val u = small.u
     // Room for "DEFENSE" in a fixed-width game font (Gen 1's 8px letters).
-    val labelU = if (com.pokedaisy.app.companion.ui.theme.LocalGameFont.current != null) 64 else 58
+    val gameFont = com.pokedaisy.app.companion.ui.theme.LocalGameFont.current != null
+    val labelU = if (gameFont) 64 else 58
+    // And for three digits in it (a base stat of 100 or more read "1..." there).
+    val valueU = if (gameFont) 28 else 22
     Column(verticalArrangement = Arrangement.spacedBy(u)) {
         stats.forEachIndexed { i, v ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GbaText(tr((if (stats.size == 5) STAT_LABELS_GEN1 else STAT_LABELS)[i]), OptionColors.label, OptionColors.labelShadow, small, Modifier.width(u * labelU))
-                GbaText("$v", OptionColors.value, OptionColors.valueShadow, small, Modifier.width(u * 22))
+                GbaText("$v", OptionColors.value, OptionColors.valueShadow, small, Modifier.width(u * valueU))
                 StatBar(v, Modifier.weight(1f).height(u * 6), u)
             }
         }

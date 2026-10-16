@@ -232,6 +232,7 @@ fun docsCompanion(
     popup: AchievementPopup? = null,
     snap: () -> SnapshotView = { snapshot().withBench() },
 ): () -> (@Composable () -> Unit) = {
+    previewCapture = com.pokedaisy.app.companion.KeyCapture()
     DeviceBattery.status.value = BatteryStatus(76, charging = false)
     val sv = snap().disguised()
     val back = com.pokedaisy.app.companion.ui.CompanionBack().also { previewBack = it }
@@ -256,6 +257,7 @@ fun docsShots(all: List<Shot>, bw: Int, bh: Int, bd: Float, tw: Int, th: Int, td
         "library-info" to "library-info", "library-sort" to "library-sort", "library-cover-picker" to "library-cover-picker",
         "library-update" to "library-update", "library-list-phone" to "phone-library",
         "setup-roms" to "setup-roms", "setup-saves" to "setup-saves", "setup-buttons" to "setup-buttons", "setup-covers" to "setup-covers",
+        "setup-buttons-capture" to "setup-buttons-capture", "game-capture-hotkey" to "game-capture",
         "settings-home" to "settings-home", "settings-search" to "settings-search", "settings-aspect" to "settings-aspect",
         "settings-shaders" to "settings-shaders", "settings-hotkeys" to "settings-hotkeys", "settings-buttons" to "settings-buttons",
         "settings-cheats" to "settings-cheats", "settings-cheats-add" to "settings-cheats-add",
@@ -310,10 +312,16 @@ fun docsShots(all: List<Shot>, bw: Int, bh: Int, bd: Float, tw: Int, th: Int, td
             onNodeWithText("TAB BAR").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("companion-settings-shaders", bw, bh, bd, docsCompanion("SETTINGS")) {
-            onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("DISPLAY OPTIONS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick); onNodeWithText("SHADERS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         },
         Shot("companion-settings-hotkeys", bw, bh, bd, docsCompanion("SETTINGS")) {
             onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        },
+        // A hotkey waiting for keys: SELECT held, R1 on its way (the game's screen asks too: game-capture).
+        Shot("companion-settings-hotkeys-capture", bw, bh, bd, docsCompanion("SETTINGS")) {
+            onNodeWithText("HOTKEYS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithText("LOAD STATE").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            pressKeys(android.view.KeyEvent.KEYCODE_BUTTON_SELECT, android.view.KeyEvent.KEYCODE_BUTTON_R1)
         },
         Shot("companion-settings-tweaks", bw, bh, bd, docsCompanion("SETTINGS")) {
             onNodeWithText("TWEAKS").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)

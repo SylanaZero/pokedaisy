@@ -45,6 +45,22 @@ class GbaInput {
         return true
     }
 
+    /** The GBA button [keyCode] is bound to (D-pad, or the player's GAME BUTTONS; a TURBO key counts as its button),
+     * null = none. The companion's window reads keys through this, so it follows the player's bindings. */
+    fun buttonFor(keyCode: Int): Int? = keyToBit(keyCode)?.let { it and GbaControls.TURBO.inv() }
+
+    /** Lets go of every key the player holds (not a script's): the companion's window took the buttons, or a rebind
+     *  the keys' releases. */
+    fun releaseAll() {
+        heldKeys.clear()
+        turboKeys.clear()
+        buttonBits = 0
+        turboBits = 0
+        hatBits = 0
+        touchBits = 0
+        recompute()
+    }
+
     /** The TURBO A / B buttons held, which the engine presses every other 2 frames; none while a script steers. */
     val turboMask: Int get() = if (scriptExclusive) 0 else turboBits
 
@@ -65,24 +81,23 @@ class GbaInput {
         recompute()
     }
 
+    /** One-off presses for the game (the QUICK MENU's SELECT for a bike or a rod): pressed on top of everything else,
+     * apart from [setScript]'s channel, which the battle controls send every frame (they'd wipe it). */
+    @Volatile private var pressBits = 0
+
+    fun setPress(bits: Int) {
+        pressBits = bits
+        recompute()
+    }
+
     fun onMotion(event: MotionEvent): Boolean {
-        if (event.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK) return false
-        val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
-        val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-        val x = if (abs(hx) > 0.5f) hx else event.getAxisValue(MotionEvent.AXIS_X)
-        val y = if (abs(hy) > 0.5f) hy else event.getAxisValue(MotionEvent.AXIS_Y)
-        var bits = 0
-        if (x < -DEAD) bits = bits or MgbaCore.Key.LEFT
-        if (x > DEAD) bits = bits or MgbaCore.Key.RIGHT
-        if (y < -DEAD) bits = bits or MgbaCore.Key.UP
-        if (y > DEAD) bits = bits or MgbaCore.Key.DOWN
-        hatBits = bits
+        hatBits = motionBits(event) ?: return false
         recompute()
         return true
     }
 
     private fun recompute() {
-        mask = if (scriptExclusive) scriptBits else buttonBits or hatBits or touchBits or scriptBits
+        mask = (if (scriptExclusive) scriptBits else buttonBits or hatBits or touchBits or scriptBits) or pressBits
     }
 
     private fun keyToBit(keyCode: Int): Int? = when (keyCode) {
@@ -100,6 +115,21 @@ class GbaInput {
 
     companion object {
         private const val DEAD = 0.5f
+
+        /** The D-pad directions a joystick event holds (its HAT, else the left stick); null = not a joystick's. */
+        fun motionBits(event: MotionEvent): Int? {
+            if (event.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK) return null
+            val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            val x = if (abs(hx) > 0.5f) hx else event.getAxisValue(MotionEvent.AXIS_X)
+            val y = if (abs(hy) > 0.5f) hy else event.getAxisValue(MotionEvent.AXIS_Y)
+            var bits = 0
+            if (x < -DEAD) bits = bits or MgbaCore.Key.LEFT
+            if (x > DEAD) bits = bits or MgbaCore.Key.RIGHT
+            if (y < -DEAD) bits = bits or MgbaCore.Key.UP
+            if (y > DEAD) bits = bits or MgbaCore.Key.DOWN
+            return bits
+        }
 
         private val DEFAULT_CONTROLS = mapOf(
             KeyEvent.KEYCODE_BUTTON_A to MgbaCore.Key.A, KeyEvent.KEYCODE_Z to MgbaCore.Key.A,

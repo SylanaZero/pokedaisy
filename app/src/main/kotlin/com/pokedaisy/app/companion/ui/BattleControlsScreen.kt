@@ -59,6 +59,10 @@ import com.pokedaisy.app.companion.data.MonView
 import com.pokedaisy.app.companion.data.MoveView
 import com.pokedaisy.app.companion.ui.theme.AppColors
 import com.pokedaisy.app.companion.ui.theme.pixelFontFamily
+import com.pokedaisy.app.companion.data.isCrystalFamily
+import com.pokedaisy.app.companion.ui.theme.gbaFocusRing
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
  * Gen 4 (Platinum) style touch battle controls: party-health ball strips
@@ -212,7 +216,7 @@ fun BattleControlsScreen(
  * visual dim/undim; far cheaper than wiring a whole new observable path
  * through EmulatorEngine for what's ultimately a cosmetic affordance. */
 @Composable
-private fun rememberBattleInputBusy(battleInput: BattleInput?): Boolean {
+internal fun rememberBattleInputBusy(battleInput: BattleInput?): Boolean {
     var busy by remember(battleInput) { mutableStateOf(battleInput?.busy ?: false) }
     androidx.compose.runtime.LaunchedEffect(battleInput) {
         // Once per frame (not a delay() timer): paused along with rendering,
@@ -301,7 +305,7 @@ private fun ActionButtons(
                 for (row in 0..1) Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (col in 0..1) {
                         val idx = row * 2 + col
-                        MoveCard(activeMon?.moves?.getOrNull(idx), battleInput, idx, busy, showHints, modifier = Modifier.weight(1f).fillMaxHeight(), compact = true)
+                        MoveCard(activeMon?.moves?.getOrNull(idx), battleInput, idx, busy, showHints, modifier = Modifier.focusStart(idx == 0).weight(1f).fillMaxHeight(), compact = true)
                     }
                 }
             }
@@ -309,7 +313,8 @@ private fun ActionButtons(
         // The active mon's mini icon sits to the left of the word, like the game.
         PlatinumButton(
             fill = FightRed, frame = FightRedDark,
-            modifier = Modifier.fillMaxWidth(0.76f).weight(1.6f),
+            // The D-pad (the companion's window) starts on FIGHT, like the game's cursor.
+            modifier = Modifier.focusStart(true).fillMaxWidth(0.76f).weight(1.6f),
             enabled = enabled,
             pressesGame = onFight == null, onClick = { onFight?.invoke() ?: battleInput?.selectAction(0) },
         ) {
@@ -347,7 +352,7 @@ private fun ActionButtons(
 }
 
 @Composable
-private fun MoveGrid(
+internal fun MoveGrid(
     moves: List<MoveView>,
     battleInput: BattleInput?,
     busy: Boolean,
@@ -355,6 +360,8 @@ private fun MoveGrid(
     modifier: Modifier = Modifier,
     /** The grid was opened by us (FIGHT not sent yet): CANCEL / BACK just close it; null = press B. */
     onCancel: (() -> Unit)? = null,
+    /** ONE-TAP MOVES' two-line cards, names fitted (BATTLE BUTTONS' smaller window). */
+    compact: Boolean = false,
 ) {
     CompanionBackHandler(enabled = battleInput != null && !busy) { onCancel?.invoke() ?: battleInput?.back() }
     if (gen1Buttons) return Gen1MoveList(moves, battleInput, busy, showHints, modifier, onCancel)
@@ -366,7 +373,8 @@ private fun MoveGrid(
             ) {
                 for (col in 0..1) {
                     val idx = row * 2 + col
-                    MoveCard(moves.getOrNull(idx), battleInput, idx, busy, showHints, modifier = Modifier.weight(1f).fillMaxHeight())
+                    // The D-pad (the companion's window) starts on the first move.
+                    MoveCard(moves.getOrNull(idx), battleInput, idx, busy, showHints, modifier = Modifier.focusStart(idx == 0).weight(1f).fillMaxHeight(), compact = compact)
                 }
             }
         }
@@ -390,7 +398,7 @@ private fun MoveGrid(
  * prompt and CANCEL, which runs [onBack].
  */
 @Composable
-private fun PartyPicker(
+internal fun PartyPicker(
     party: List<MonView>,
     foe: MonView?,
     active: List<MonView>,
@@ -426,7 +434,7 @@ private fun PartyPicker(
 }
 
 /** Whether [mon] can be sent in: not fainted, not an egg, not already out (and a real mon to find). */
-private fun canSendIn(mon: MonView, active: List<MonView>): Boolean =
+internal fun canSendIn(mon: MonView, active: List<MonView>): Boolean =
     !mon.isEgg && mon.hp > 0 && !isOut(mon, active) && mon.personality != 0L
 
 @Composable
@@ -443,7 +451,7 @@ private fun BackOnlyButton(battleInput: BattleInput?, busy: Boolean) {
 }
 
 @Composable
-private fun MoveCard(
+internal fun MoveCard(
     mv: MoveView?,
     battleInput: BattleInput?,
     moveIndex: Int,
@@ -527,15 +535,21 @@ internal fun PlatinumButton(
     enabled: Boolean = true,
     pressesGame: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(8.dp),
+    /** The near-black outline's width. */
+    outline: Dp = 2.dp,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val shape = PixelRoundedShape(5.dp)
     val sound = LocalClickSound.current
     val gameSilent = LocalGameSilent.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     Box(
         modifier = modifier
             .alpha(if (enabled) 1f else 0.45f)
+            // The D-pad's focus (the companion's window), over the bevel and the content.
+            .gbaFocusRing(focused, shape)
             .then(
                 // Gen 1 (Yellow): a button is its text box - white inside the double line.
                 if (gen1Buttons) Modifier.drawBehind {
@@ -544,14 +558,14 @@ internal fun PlatinumButton(
                     // Near-black outline, then the fill with Platinum's bevel.
                     .clip(shape)
                     .background(ButtonOutline)
-                    .padding(2.dp)
+                    .padding(outline)
                     .clip(shape)
                     .background(fill)
                     .platinumBevel(fill, frame),
             )
             .then(
                 if (enabled) {
-                    Modifier.clickable(onClick = {
+                    Modifier.clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, onClick = {
                         onClick()
                         // The game sounds its own button - unless it can't be heard (FF's STEADY music mutes it).
                         if (!pressesGame || gameSilent()) sound()
@@ -620,7 +634,7 @@ private fun Gen1ActionButtons(
     val m = rememberGbaTextMetrics(2f)
     @Composable
     fun cell(label: String, index: Int, mod: Modifier, icon: Boolean = false) = PlatinumButton(
-        fill = Color.White, frame = Color.White, modifier = mod, enabled = enabled,
+        fill = Color.White, frame = Color.White, modifier = mod.focusStart(index == 0), enabled = enabled,
         pressesGame = index != 2 || onPokemon == null,
         onClick = { if (index == 2 && onPokemon != null) onPokemon() else battleInput?.selectAction(index) },
     ) {
@@ -629,14 +643,19 @@ private fun Gen1ActionButtons(
             GbaText(label, buttonContent, Color.Transparent, m, bold = true)
         }
     }
+    // Prism's menu is mixed case (Fight / PkMn / Pack / Run); Yellow's in each language's own words.
+    val words = if (com.pokedaisy.app.companion.data.activeGame == com.pokedaisy.app.companion.data.GameKind.PRISM)
+        listOf("Fight", "PkMn", "Pack", "Run")
+        else com.pokedaisy.app.companion.data.gen1BattleMenuWords(com.pokedaisy.app.companion.data.romLanguage)
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            cell("FIGHT", 0, Modifier.weight(1f).fillMaxHeight(), icon = true)
-            cell("PkMn", 2, Modifier.weight(1f).fillMaxHeight())
+            cell(words[0], 0, Modifier.weight(1f).fillMaxHeight(), icon = true)
+            cell(words[1], 2, Modifier.weight(1f).fillMaxHeight())
         }
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            cell("ITEM", 1, Modifier.weight(1f).fillMaxHeight())
-            cell("RUN", 3, Modifier.weight(1f).fillMaxHeight())
+            // Crystal calls the bag PACK.
+            cell(if (com.pokedaisy.app.companion.data.activeGame.isCrystalFamily && words[2] != "Pack") "PACK" else words[2], 1, Modifier.weight(1f).fillMaxHeight())
+            cell(words[3], 3, Modifier.weight(1f).fillMaxHeight())
         }
     }
 }
@@ -702,7 +721,8 @@ private fun Gen1MoveList(
 }
 
 /** A Game Boy game's buttons are plain text boxes ([PlatinumButton]). */
-private val gen1Buttons get() = com.pokedaisy.app.companion.data.activeGame == com.pokedaisy.app.companion.data.GameKind.YELLOW
+internal val gen1Buttons get() = com.pokedaisy.app.companion.data.activeGame == com.pokedaisy.app.companion.data.GameKind.YELLOW ||
+    com.pokedaisy.app.companion.data.activeGame.isCrystalFamily   // Gen 2's menu is laid out the same
 
 /** [text] on one line at the largest whole size from [maxSize] down to [minSize] (sp) that fits the
  * width it's given; still too long at [minSize], it ends in an ellipsis. */
@@ -725,16 +745,16 @@ internal val buttonContent: Color get() = if (gen1Buttons) OptionColors.titleTex
 
 private val ButtonOutline = Color(0xFF202020)
 private val RunDrop = 16.dp
-private val FightRed = Color(0xFFE8483C)
-private val FightRedDark = Color(0xFFA82820)
+internal val FightRed = Color(0xFFE8483C)
+internal val FightRedDark = Color(0xFFA82820)
 private val BagOrange = Color(0xFFE0A030)
 private val BagOrangeDark = Color(0xFFA87018)
 internal val RunBlue = Color(0xFF4890D8)
 internal val RunBlueDark = Color(0xFF2860A0)
 internal val MonGreen = Color(0xFF58A840)
 internal val MonGreenDark = Color(0xFF307020)
-private val MoveCardFill = Color(0xFFE8E8B0)
-private val MoveTextShadow = Color(0xFFC0C088)
+internal val MoveCardFill = Color(0xFFE8E8B0)
+internal val MoveTextShadow = Color(0xFFC0C088)
 internal val InfoPurple = Color(0xFF9068D0)
 internal val InfoPurpleDark = Color(0xFF5C3C98)
 internal val SuggestGold = Color(0xFFE8B830)
